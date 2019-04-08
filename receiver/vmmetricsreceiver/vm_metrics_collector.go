@@ -121,6 +121,7 @@ func (vmc *VMMetricsCollector) scrape(prevProcStat *procfs.ProcStat, prevStat *p
 				prevProcStat = &procStat
 			} else {
 				stats.Record(ctx, mCPUSeconds.M(int64(procStat.CPUTime())))
+				log.Printf("first time reporting process stats")
 			}
 		}
 	}
@@ -158,6 +159,7 @@ func (vmc *VMMetricsCollector) scrape(prevProcStat *procfs.ProcStat, prevStat *p
 				mSystemCPUSeconds.M(cpuStat.System),
 				mIdleCPUSeconds.M(cpuStat.Idle),
 				mIowaitCPUSeconds.M(cpuStat.Iowait))
+			log.Printf("first time reporting vm stats")
 		}
 	}
 	return prevProcStat, prevStat

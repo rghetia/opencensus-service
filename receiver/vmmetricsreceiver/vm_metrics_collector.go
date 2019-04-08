@@ -30,6 +30,7 @@ import (
 	"github.com/census-instrumentation/opencensus-service/data"
 
 	metricspb "github.com/census-instrumentation/opencensus-proto/gen-go/metrics/v1"
+	"log"
 )
 
 // VMMetricsCollector is a struct that contains views related to VM and process metrics (cpu, mem, etc),
@@ -116,6 +117,7 @@ func (vmc *VMMetricsCollector) scrape(prevProcStat *procfs.ProcStat, prevStat *p
 		if err == nil {
 			if prevProcStat != nil {
 				stats.Record(ctx, mCPUSeconds.M(int64(procStat.CPUTime() - prevProcStat.CPUTime())))
+				log.Printf("process cpu %d\n", int64(procStat.CPUTime() - prevProcStat.CPUTime()))
 				prevProcStat = &procStat
 			} else {
 				stats.Record(ctx, mCPUSeconds.M(int64(procStat.CPUTime())))
@@ -139,6 +141,13 @@ func (vmc *VMMetricsCollector) scrape(prevProcStat *procfs.ProcStat, prevStat *p
 				mSystemCPUSeconds.M(cpuStat.System - prevStat.CPUTotal.System),
 				mIdleCPUSeconds.M(cpuStat.Idle - prevStat.CPUTotal.Idle),
 				mIowaitCPUSeconds.M(cpuStat.Iowait - prevStat.CPUTotal.Iowait))
+			log.Printf("Delta user %d, nice %d, system %d, idle %d, iowait %d\n",
+				int64(stat.ProcessCreated - prevStat.ProcessCreated),
+				cpuStat.User - prevStat.CPUTotal.User,
+				cpuStat.Nice - prevStat.CPUTotal.Nice,
+				cpuStat.System - prevStat.CPUTotal.System,
+				cpuStat.Idle - prevStat.CPUTotal.Idle,
+				cpuStat.Iowait - prevStat.CPUTotal.Iowait)
 			prevStat = &stat
 		} else {
 			stats.Record(

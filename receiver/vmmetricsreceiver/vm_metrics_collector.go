@@ -118,12 +118,12 @@ func (vmc *VMMetricsCollector) scrape(prevProcStat *procfs.ProcStat, prevStat *p
 			if prevProcStat != nil {
 				stats.Record(ctx, mCPUSeconds.M(int64(procStat.CPUTime() - prevProcStat.CPUTime())))
 				log.Printf("process cpu %d\n", int64(procStat.CPUTime() - prevProcStat.CPUTime()))
-				prevProcStat = &procStat
 			} else {
 				stats.Record(ctx, mCPUSeconds.M(int64(procStat.CPUTime())))
 				log.Printf("first time reporting process stats")
 			}
 		}
+		prevProcStat = &procStat
 	}
 
 	stat, err := vmc.fs.NewStat()
@@ -149,7 +149,6 @@ func (vmc *VMMetricsCollector) scrape(prevProcStat *procfs.ProcStat, prevStat *p
 				cpuStat.System - prevStat.CPUTotal.System,
 				cpuStat.Idle - prevStat.CPUTotal.Idle,
 				cpuStat.Iowait - prevStat.CPUTotal.Iowait)
-			prevStat = &stat
 		} else {
 			stats.Record(
 				ctx,
@@ -161,6 +160,7 @@ func (vmc *VMMetricsCollector) scrape(prevProcStat *procfs.ProcStat, prevStat *p
 				mIowaitCPUSeconds.M(cpuStat.Iowait))
 			log.Printf("first time reporting vm stats")
 		}
+		prevStat = &stat
 	}
 	return prevProcStat, prevStat
 }

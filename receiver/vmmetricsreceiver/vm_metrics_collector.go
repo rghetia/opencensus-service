@@ -117,7 +117,8 @@ func (vmc *VMMetricsCollector) scrape(prevProcStat *procfs.ProcStat, prevStat *p
 		if err == nil {
 			if prevProcStat != nil {
 				stats.Record(ctx, mCPUSeconds.M(int64(procStat.CPUTime() - prevProcStat.CPUTime())))
-				log.Printf("process cpu %d\n", int64(procStat.CPUTime() - prevProcStat.CPUTime()))
+				log.Printf("process cpu %d, prev %f, curr %f\n", int64(procStat.CPUTime() - prevProcStat.CPUTime()),
+					prevProcStat.CPUTime(), procStat.CPUTime())
 			} else {
 				stats.Record(ctx, mCPUSeconds.M(int64(procStat.CPUTime())))
 				log.Printf("first time reporting process stats")
@@ -142,7 +143,7 @@ func (vmc *VMMetricsCollector) scrape(prevProcStat *procfs.ProcStat, prevStat *p
 				mSystemCPUSeconds.M(cpuStat.System - prevStat.CPUTotal.System),
 				mIdleCPUSeconds.M(cpuStat.Idle - prevStat.CPUTotal.Idle),
 				mIowaitCPUSeconds.M(cpuStat.Iowait - prevStat.CPUTotal.Iowait))
-			log.Printf("Delta user %d, nice %d, system %d, idle %d, iowait %d\n",
+			log.Printf("Delta process-created %d user %f, nice %f, system %f, idle %f, iowait %f\n",
 				int64(stat.ProcessCreated - prevStat.ProcessCreated),
 				cpuStat.User - prevStat.CPUTotal.User,
 				cpuStat.Nice - prevStat.CPUTotal.Nice,

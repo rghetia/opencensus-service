@@ -116,11 +116,11 @@ func (vmc *VMMetricsCollector) scrape(prevProcStat *procfs.ProcStat, prevStat *p
 		procStat, err := proc.NewStat()
 		if err == nil {
 			if prevProcStat != nil {
-				stats.Record(ctx, mCPUSeconds.M(int64(procStat.CPUTime() - prevProcStat.CPUTime())))
-				log.Printf("process cpu %d, prev %f, curr %f\n", int64(procStat.CPUTime() - prevProcStat.CPUTime()),
+				stats.Record(ctx, mCPUSeconds.M(procStat.CPUTime() - prevProcStat.CPUTime()))
+				log.Printf("process cpu %f, prev %f, curr %f\n", procStat.CPUTime() - prevProcStat.CPUTime(),
 					prevProcStat.CPUTime(), procStat.CPUTime())
 			} else {
-				stats.Record(ctx, mCPUSeconds.M(int64(procStat.CPUTime())))
+				stats.Record(ctx, mCPUSeconds.M(procStat.CPUTime()))
 				log.Printf("first time reporting process stats")
 			}
 		}

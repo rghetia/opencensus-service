@@ -44,6 +44,7 @@ import (
 	"github.com/census-instrumentation/opencensus-service/receiver/vmmetricsreceiver"
 	"github.com/census-instrumentation/opencensus-service/receiver/zipkinreceiver"
 	"github.com/census-instrumentation/opencensus-service/receiver/zipkinreceiver/zipkinscribereceiver"
+	"github.com/census-instrumentation/opencensus-service/receiver/envoyreceiver"
 )
 
 var rootCmd = &cobra.Command{
@@ -182,6 +183,15 @@ func runOCAgent() {
 			log.Fatal(err)
 		}
 		closeFns = append(closeFns, vmmDoneFn)
+	}
+
+	if agentConfig.EnvoyReceiverEnabled() {
+		envoyAddr := agentConfig.EnvoyReceiverAddr()
+		jaegerDoneFn, err := runEnvoyReceiver(envoyAddr, commonMetricsSink, asyncErrorChan)
+		if err != nil {
+			log.Fatal(err)
+		}
+		closeFns = append(closeFns, jaegerDoneFn)
 	}
 
 	// Always cleanup finally
@@ -347,3 +357,19 @@ func runVMMetricsReceiver(v *viper.Viper, next consumer.MetricsConsumer, asyncEr
 	log.Print("Running VMMetrics receiver")
 	return doneFn, nil
 }
+
+func runEnvoyReceiver(envoyAddr string, next consumer.MetricsConsumer, asyncErrorChan chan<- error) (doneFn func() error, err error) {
+	emr, err := envoyreceiver.New(envoyAddr, next)
+	if err != nil {
+		return nil, err
+	}
+	if err := emr.StartMetricsReception(context.Background(), asyncErrorChan); err != nil {
+		return nil, err
+	}
+	doneFn = func() error {
+		return emr.StopMetricsReception(context.Background())
+	}
+	log.Print("Running Envoy receiver")
+	return doneFn, nil
+}
+

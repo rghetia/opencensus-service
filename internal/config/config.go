@@ -103,6 +103,7 @@ type Receivers struct {
 	Jaeger     *ReceiverConfig       `mapstructure:"jaeger"`
 	Scribe     *ScribeReceiverConfig `mapstructure:"zipkin-scribe"`
 	VMMetrics  *ReceiverConfig       `mapstructure:"vmmetrics"`
+	Envoy      *ReceiverConfig       `mapstructure:"envoy"`
 
 	// Prometheus contains the Prometheus configurations.
 	// Such as:
@@ -383,6 +384,29 @@ func (c *Config) VMMetricsReceiverEnabled() bool {
 	}
 	return c.Receivers != nil && c.Receivers.VMMetrics != nil
 }
+
+// EnvoyReceiverEnabled returns true if Config is non-nil
+// and if the Envoy receiver configuration is also non-nil.
+func (c *Config) EnvoyReceiverEnabled() bool {
+	if c == nil {
+		return false
+	}
+	return c.Receivers != nil && c.Receivers.Envoy != nil
+}
+
+// EnvoyReceiverAddr is a helper to safely retrieve the address
+// that the Envoy receiver will run on.
+func (c *Config) EnvoyReceiverAddr() (envoyAddr string) {
+	if c == nil || c.Receivers == nil {
+		return ""
+	}
+	ec := c.Receivers
+	if ec.Envoy == nil {
+		return ""
+	}
+	return ec.Envoy.Address
+}
+
 
 // CheckLogicalConflicts serves to catch logical errors such as
 // if the Zipkin receiver port conflicts with that of the exporter,

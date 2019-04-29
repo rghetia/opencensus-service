@@ -5,7 +5,7 @@ require (
 	contrib.go.opencensus.io/exporter/jaeger v0.1.1-0.20190430175949-e8b55949d948
 	contrib.go.opencensus.io/exporter/ocagent v0.5.0
 	contrib.go.opencensus.io/exporter/prometheus v0.1.0
-	contrib.go.opencensus.io/exporter/stackdriver v0.12.1
+	contrib.go.opencensus.io/exporter/stackdriver v0.12.2-0.20190603171149-68e3d742b03c
 	contrib.go.opencensus.io/exporter/zipkin v0.1.1
 	github.com/DataDog/datadog-go v2.2.0+incompatible // indirect
 	github.com/DataDog/opencensus-go-exporter-datadog v0.0.0-20181026070331-e7c4bd17b329
@@ -13,6 +13,9 @@ require (
 	github.com/apache/thrift v0.0.0-20161221203622-b2a4d4ae21c7
 	github.com/bmizerany/perks v0.0.0-20141205001514-d9a9656a3a4b // indirect
 	github.com/census-instrumentation/opencensus-proto v0.2.0
+	github.com/dgrijalva/jwt-go v3.2.0+incompatible // indirect
+	github.com/envoyproxy/go-control-plane v0.7.1
+	github.com/envoyproxy/protoc-gen-validate v0.0.14 // indirect
 	github.com/facebookgo/ensure v0.0.0-20160127193407-b4ab57deab51 // indirect
 	github.com/facebookgo/limitgroup v0.0.0-20150612190941-6abd8d71ec01 // indirect
 	github.com/facebookgo/muster v0.0.0-20150708232844-fd3d7953fd52 // indirect
@@ -62,4 +65,8 @@ require (
 	gopkg.in/DataDog/dd-trace-go.v1 v1.12.1 // indirect
 	gopkg.in/alexcesaro/statsd.v2 v2.0.0 // indirect
 	gopkg.in/yaml.v2 v2.2.2
+	istio.io/gogo-genproto v0.0.0-20190124151557-6d926a6e6feb
+	k8s.io/apimachinery v0.0.0-20190207091153-095b9d203467 // indirect
+	k8s.io/kube-openapi v0.0.0-20190205224424-fd29a9f2f429 // indirect
+	sigs.k8s.io/structured-merge-diff v0.0.0-20190130003954-e5e029740eb8 // indirect
 )

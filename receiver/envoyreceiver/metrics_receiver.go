@@ -33,6 +33,7 @@ import (
 	prometheus "istio.io/gogo-genproto/prometheus"
 	"github.com/census-instrumentation/opencensus-service/data"
 	"github.com/golang/protobuf/ptypes/timestamp"
+	"google.golang.org/grpc/peer"
 )
 
 // Receiver is the type that exposes Trace and Metrics reception.
@@ -102,7 +103,7 @@ func (ir *Receiver) StreamMetrics(stream metricspb.MetricsService_StreamMetricsS
 		}
 		fmt.Printf("%v\n", msg)
 		// TODO: process message.
-		ir.processStreamMessage(msg)
+		ir.processStreamMessage(stream.Context(), msg)
 	}
 }
 
@@ -307,18 +308,27 @@ func (ir *Receiver) metricToOCMetric(metric *prometheus.MetricFamily) (*ocmetric
 	return ocmetric, nil
 }
 
-func (ir *Receiver) idToNode(id *metricspb.StreamMetricsMessage_Identifier) *commonpb.Node {
+func (ir *Receiver) idToNode(ctx context.Context, id *metricspb.StreamMetricsMessage_Identifier) *commonpb.Node {
 	// TODD: figure want how to map istio node to OC Agent node.
+	hostname := "nohost"
+	if id != nil && id.Node != nil {
+		hostname = id.Node.Id
+	} else {
+		pr, ok := peer.FromContext(ctx)
+		if ok {
+			hostname = pr.Addr.String()
+		}
+	}
 	node := &commonpb.Node{
-		Identifier:  &commonpb.ProcessIdentifier{HostName: id.Node.Id},
+		Identifier:  &commonpb.ProcessIdentifier{HostName: hostname},
 		LibraryInfo: &commonpb.LibraryInfo{},
 		ServiceInfo: &commonpb.ServiceInfo{},
 	}
 	return node
 }
 
-func (ir *Receiver) processStreamMessage(msg *metricspb.StreamMetricsMessage) {
-	md := data.MetricsData{Node: ir.idToNode(msg.GetIdentifier())}
+func (ir *Receiver) processStreamMessage(ctx context.Context, msg *metricspb.StreamMetricsMessage) {
+	md := data.MetricsData{Node: ir.idToNode(ctx, msg.GetIdentifier())}
 	metrics := msg.GetEnvoyMetrics()
 	for _, metric := range metrics {
 		m, err := ir.metricToOCMetric(metric)

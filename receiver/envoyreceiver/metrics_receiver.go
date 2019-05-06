@@ -33,6 +33,7 @@ import (
 	prometheus "istio.io/gogo-genproto/prometheus"
 	"github.com/census-instrumentation/opencensus-service/data"
 	"github.com/golang/protobuf/ptypes/timestamp"
+	"google.golang.org/api/support/bundler"
 	"google.golang.org/grpc/peer"
 )
 
@@ -42,6 +43,7 @@ type Receiver struct {
 	ln                net.Listener
 	serverGRPC        *grpc.Server
 	grpcServerOptions []grpc.ServerOption
+	protoMetricsBundler *bundler.Bundler
 
 	metricsConsumer consumer.MetricsConsumer
 
@@ -50,6 +52,12 @@ type Receiver struct {
 	startMetricsReceiverOnce sync.Once
 }
 
+type metricProtoPayload struct {
+	ctx     context.Context
+	msg   *metricspb.StreamMetricsMessage
+}
+
+
 var (
 	errAlreadyStarted = errors.New("already started")
 	errAlreadyStopped = errors.New("already stopped")
@@ -57,6 +65,9 @@ var (
 
 const source string = "EnvoyReceiver"
 const defaultAddr string = ":55700"
+const defaultBundleCountThreshold = 300
+const defaultBundleDelayThreshold = 10
+
 
 // New just creates the Istio receiver services. It is the caller's
 // responsibility to invoke the respective Start*Reception methods as well
@@ -76,6 +87,15 @@ func New(addr string, mc consumer.MetricsConsumer) (*Receiver, error) {
 
 	ir.metricsConsumer = mc
 
+	ir.protoMetricsBundler = bundler.NewBundler((*metricProtoPayload)(nil), func(bundle interface{}) {
+		payloads := bundle.([]*metricProtoPayload)
+		ir.handleStreamMetricMessage(payloads)
+	})
+	// TODO: provide option to set bundle options.
+	ir.protoMetricsBundler.BundleCountThreshold = defaultBundleCountThreshold
+	ir.protoMetricsBundler.DelayThreshold = defaultBundleDelayThreshold
+
+
 	return ir, nil
 }
 
@@ -84,6 +104,12 @@ func (ir *Receiver) MetricsSource() string {
 	return source
 }
 
+func (ir *Receiver) handleStreamMetricMessage(payloads []*metricProtoPayload) {
+	for _, payload := range payloads {
+		ir.processStreamMessage(payload)
+	}
+
+}
 // StartMetricsReception exclusively runs the Metrics receiver on the gRPC server.
 // To start both Trace and Metrics receivers/services, please use Start.
 func (ir *Receiver) StartMetricsReception(ctx context.Context, asyncErrorChan chan<- error) error {
@@ -101,7 +127,11 @@ func (ir *Receiver) StreamMetrics(stream metricspb.MetricsService_StreamMetricsS
 			return stream.SendAndClose(&metricspb.StreamMetricsResponse{
 			})
 		}
-		ir.processStreamMessage(stream.Context(), msg)
+		payload := &metricProtoPayload{
+			ctx: stream.Context(),
+			msg: msg,
+		}
+		ir.protoMetricsBundler.Add(payload, 1)
 	}
 }
 
@@ -328,9 +358,9 @@ func (ir *Receiver) idToNode(ctx context.Context, id *metricspb.StreamMetricsMes
 	return node
 }
 
-func (ir *Receiver) processStreamMessage(ctx context.Context, msg *metricspb.StreamMetricsMessage) {
-	md := data.MetricsData{Node: ir.idToNode(ctx, msg.GetIdentifier())}
-	metrics := msg.GetEnvoyMetrics()
+func (ir *Receiver) processStreamMessage(payload *metricProtoPayload) {
+	md := data.MetricsData{Node: ir.idToNode(payload.ctx, payload.msg.GetIdentifier())}
+	metrics := payload.msg.GetEnvoyMetrics()
 	for _, metric := range metrics {
 		m, err := ir.metricToOCMetric(metric)
 		if err != nil {

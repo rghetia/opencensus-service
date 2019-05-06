@@ -297,6 +297,9 @@ func (ir *Receiver) toTimeseries(metric *prometheus.MetricFamily) []*ocmetricspb
 func (ir *Receiver) metricToOCMetric(metric *prometheus.MetricFamily) (*ocmetricspb.Metric, error) {
 
 	descriptor := ir.toDesc(metric)
+	if descriptor.Type == ocmetricspb.MetricDescriptor_UNSPECIFIED {
+		return nil, fmt.Errorf("descriptor type unspecified %v", descriptor)
+	}
 	timeseries := ir.toTimeseries(metric)
 
 	ocmetric := &ocmetricspb.Metric{

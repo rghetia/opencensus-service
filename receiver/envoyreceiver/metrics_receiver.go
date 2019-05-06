@@ -101,8 +101,6 @@ func (ir *Receiver) StreamMetrics(stream metricspb.MetricsService_StreamMetricsS
 			return stream.SendAndClose(&metricspb.StreamMetricsResponse{
 			})
 		}
-		fmt.Printf("%v\n", msg)
-		// TODO: process message.
 		ir.processStreamMessage(stream.Context(), msg)
 	}
 }

@@ -111,6 +111,8 @@ func New(addr string, mc consumer.MetricsConsumer) (*Receiver, error) {
 	ir.protoMetricsBundler.DelayThreshold = defaultBundleDelayThreshold
 
 	ir.db = map[string]metricsdb{}
+	ir.nodeMap = map[string]*core.Node{}
+	
 	return ir, nil
 }
 

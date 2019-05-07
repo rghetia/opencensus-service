@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"time"
@@ -26,10 +27,11 @@ import (
 
 	"github.com/census-instrumentation/opencensus-service/consumer"
 	"github.com/census-instrumentation/opencensus-service/observability"
+
+	"github.com/envoyproxy/go-control-plane/envoy/api/v2/core"
 	metricspb "github.com/envoyproxy/go-control-plane/envoy/service/metrics/v2"
 	ocmetricspb "github.com/census-instrumentation/opencensus-proto/gen-go/metrics/v1"
 	commonpb "github.com/census-instrumentation/opencensus-proto/gen-go/agent/common/v1"
-	"io"
 	prometheus "istio.io/gogo-genproto/prometheus"
 	"github.com/census-instrumentation/opencensus-service/data"
 	"github.com/golang/protobuf/ptypes/timestamp"
@@ -50,10 +52,23 @@ type Receiver struct {
 	stopOnce                 sync.Once
 	startServerOnce          sync.Once
 	startMetricsReceiverOnce sync.Once
+
+	nodeMap map[string]*core.Node
+	db      map[string]metricsdb
+	dbMu    sync.RWMutex
+
+	timer      *time.Ticker
+	quit,done chan bool
+}
+
+type metricsdb struct {
+	node *core.Node
+	mf map[string]*prometheus.MetricFamily
 }
 
 type metricProtoPayload struct {
 	ctx     context.Context
+	clientAddr string
 	msg   *metricspb.StreamMetricsMessage
 }
 
@@ -63,10 +78,13 @@ var (
 	errAlreadyStopped = errors.New("already stopped")
 )
 
-const source string = "EnvoyReceiver"
-const defaultAddr string = ":55700"
-const defaultBundleCountThreshold = 300
-const defaultBundleDelayThreshold = 10
+const (
+	defaultReportingDuration    = 60 * time.Second
+	source                      = "EnvoyReceiver"
+	defaultAddr                 = ":55700"
+	defaultBundleCountThreshold = 300
+	defaultBundleDelayThreshold = 10
+)
 
 
 // New just creates the Istio receiver services. It is the caller's
@@ -95,9 +113,45 @@ func New(addr string, mc consumer.MetricsConsumer) (*Receiver, error) {
 	ir.protoMetricsBundler.BundleCountThreshold = defaultBundleCountThreshold
 	ir.protoMetricsBundler.DelayThreshold = defaultBundleDelayThreshold
 
-
+	ir.db = map[string]metricsdb{}
 	return ir, nil
 }
+
+func (ir *Receiver) export() {
+	// First copy
+	ir.dbMu.Lock()
+	defer ir.dbMu.Unlock()
+
+	prev := ir.db
+	ir.db = map[string]metricsdb{}
+	for id, db := range prev {
+		fmt.Printf("Exporting metrics for node %s: count %d\n", id, len(db.mf))
+		md := data.MetricsData{Node: ir.idToNode(db.node)}
+		for _, metric := range db.mf {
+			m, err := ir.metricToOCMetric(metric)
+			if err != nil {
+				// TODO: count errors
+				continue
+			}
+			md.Metrics = append(md.Metrics, m)
+		}
+		ir.metricsConsumer.ConsumeMetricsData(context.Background(), md)
+	}
+}
+
+func (ir *Receiver) startInternal() {
+	for {
+		select {
+		case <-ir.timer.C:
+			ir.export()
+		case <-ir.quit:
+			ir.timer.Stop()
+			ir.done <- true
+			return
+		}
+	}
+}
+
 
 // MetricsSource returns the name of the metrics data source.
 func (ir *Receiver) MetricsSource() string {
@@ -127,9 +181,18 @@ func (ir *Receiver) StreamMetrics(stream metricspb.MetricsService_StreamMetricsS
 			return stream.SendAndClose(&metricspb.StreamMetricsResponse{
 			})
 		}
+		pr, ok := peer.FromContext(stream.Context())
+		var clientAddr string
+		if ok {
+			clientAddr = pr.Addr.String()
+		} else {
+			clientAddr = "unknown"
+		}
+
 		payload := &metricProtoPayload{
-			ctx: stream.Context(),
-			msg: msg,
+			ctx:        stream.Context(),
+			clientAddr: clientAddr,
+			msg:        msg,
 		}
 		ir.protoMetricsBundler.Add(payload, 1)
 	}
@@ -163,6 +226,15 @@ func (ir *Receiver) StopMetricsReception(ctx context.Context) error {
 	// StopMetricsReception is a noop currently.
 	// TODO: (@odeke-em) investigate whether or not gRPC
 	// provides a way to stop specific services.
+
+	if ir.quit == nil {
+		return nil
+	}
+	ir.quit <- true
+	<-ir.done
+	close(ir.quit)
+	close(ir.done)
+	ir.quit = nil
 	return nil
 }
 
@@ -184,6 +256,13 @@ func (ir *Receiver) startServer() error {
 			// No error otherwise returned in the period of 1s.
 			// We can assume that the serve is at least running.
 			err = nil
+
+			//Start export timer.
+			ir.timer = time.NewTicker(defaultReportingDuration)
+			ir.quit = make(chan bool)
+			ir.done = make(chan bool)
+
+			ir.startInternal()
 		}
 	})
 	return err
@@ -339,37 +418,56 @@ func (ir *Receiver) metricToOCMetric(metric *prometheus.MetricFamily) (*ocmetric
 	return ocmetric, nil
 }
 
-func (ir *Receiver) idToNode(ctx context.Context, id *metricspb.StreamMetricsMessage_Identifier) *commonpb.Node {
+func (ir *Receiver) idToNode(n *core.Node) *commonpb.Node {
 	// TODD: figure want how to map istio node to OC Agent node.
-	hostname := "nohost"
-	if id != nil && id.Node != nil {
-		hostname = id.Node.Id
-	} else {
-		pr, ok := peer.FromContext(ctx)
-		if ok {
-			hostname = pr.Addr.String()
-		}
-	}
 	node := &commonpb.Node{
-		Identifier:  &commonpb.ProcessIdentifier{HostName: hostname},
+		Identifier:  &commonpb.ProcessIdentifier{HostName: n.Id},
 		LibraryInfo: &commonpb.LibraryInfo{},
 		ServiceInfo: &commonpb.ServiceInfo{},
 	}
 	return node
 }
 
+func (ir *Receiver) addNodeID(clientAddr string, node *core.Node) {
+	ir.nodeMap[clientAddr] = node
+}
+
+func (ir *Receiver) getNodeID(clientAddr string) *core.Node {
+	id, ok := ir.nodeMap[clientAddr]
+	if ok {
+		return id
+	}
+	return nil
+}
+
+func (ir *Receiver) storeMetric(node *core.Node, metric *prometheus.MetricFamily) {
+	db, ok := ir.db[node.Id]
+	if ok {
+		db.mf[metric.Name] = metric
+	} else {
+		ir.db[node.Id] = metricsdb{ node: node, mf: map[string]*prometheus.MetricFamily{} }
+	}
+}
+
 func (ir *Receiver) processStreamMessage(payload *metricProtoPayload) {
-	md := data.MetricsData{Node: ir.idToNode(payload.ctx, payload.msg.GetIdentifier())}
+	ir.dbMu.Lock()
+	defer ir.dbMu.Unlock()
+
+	id := payload.msg.GetIdentifier()
+	if id != nil && id.Node != nil {
+		ir.addNodeID(payload.clientAddr, id.Node)
+	}
+
+	node := ir.getNodeID(payload.clientAddr)
+	if node == nil {
+		// should never happen
+		fmt.Errorf("Received metrics without node info from %s", payload.clientAddr)
+		return
+	}
 	metrics := payload.msg.GetEnvoyMetrics()
 	for _, metric := range metrics {
-		m, err := ir.metricToOCMetric(metric)
-		if err != nil {
-			// TODO: count errors
-			continue
-		}
-		md.Metrics = append(md.Metrics, m)
+		ir.storeMetric(node, metric)
 	}
-	ir.metricsConsumer.ConsumeMetricsData(context.Background(), md)
 }
 
 func timeToProtoTimestamp(ms int64) *timestamp.Timestamp {

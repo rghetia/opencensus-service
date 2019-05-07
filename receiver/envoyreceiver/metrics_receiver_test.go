@@ -18,8 +18,8 @@ import (
 	"testing"
 
 	ocmetricspb "github.com/census-instrumentation/opencensus-proto/gen-go/metrics/v1"
-	prometheus "istio.io/gogo-genproto/prometheus"
 	"github.com/google/go-cmp/cmp"
+	prometheus "istio.io/gogo-genproto/prometheus"
 )
 
 func TestMetricToOcMetric(t *testing.T) {

@@ -23,28 +23,27 @@ import (
 	"sync"
 	"time"
 
-	"google.golang.org/grpc"
-
 	"github.com/census-instrumentation/opencensus-service/consumer"
 	"github.com/census-instrumentation/opencensus-service/observability"
 
+	commonpb "github.com/census-instrumentation/opencensus-proto/gen-go/agent/common/v1"
+	ocmetricspb "github.com/census-instrumentation/opencensus-proto/gen-go/metrics/v1"
+	"github.com/census-instrumentation/opencensus-service/data"
 	"github.com/envoyproxy/go-control-plane/envoy/api/v2/core"
 	metricspb "github.com/envoyproxy/go-control-plane/envoy/service/metrics/v2"
-	ocmetricspb "github.com/census-instrumentation/opencensus-proto/gen-go/metrics/v1"
-	commonpb "github.com/census-instrumentation/opencensus-proto/gen-go/agent/common/v1"
-	prometheus "istio.io/gogo-genproto/prometheus"
-	"github.com/census-instrumentation/opencensus-service/data"
 	"github.com/golang/protobuf/ptypes/timestamp"
 	"google.golang.org/api/support/bundler"
 	"google.golang.org/grpc/peer"
+	"google.golang.org/grpc"
+	prometheus "istio.io/gogo-genproto/prometheus"
 )
 
 // Receiver is the type that exposes Trace and Metrics reception.
 type Receiver struct {
-	mu                sync.Mutex
-	ln                net.Listener
-	serverGRPC        *grpc.Server
-	grpcServerOptions []grpc.ServerOption
+	mu                  sync.Mutex
+	ln                  net.Listener
+	serverGRPC          *grpc.Server
+	grpcServerOptions   []grpc.ServerOption
 	protoMetricsBundler *bundler.Bundler
 
 	metricsConsumer consumer.MetricsConsumer
@@ -58,20 +57,19 @@ type Receiver struct {
 	dbMu    sync.RWMutex
 
 	timer      *time.Ticker
-	quit,done chan bool
+	quit, done chan bool
 }
 
 type metricsdb struct {
 	node *core.Node
-	mf map[string]*prometheus.MetricFamily
+	mf   map[string]*prometheus.MetricFamily
 }
 
 type metricProtoPayload struct {
-	ctx     context.Context
+	ctx        context.Context
 	clientAddr string
-	msg   *metricspb.StreamMetricsMessage
+	msg        *metricspb.StreamMetricsMessage
 }
-
 
 var (
 	errAlreadyStarted = errors.New("already started")
@@ -85,7 +83,6 @@ const (
 	defaultBundleCountThreshold = 300
 	defaultBundleDelayThreshold = 10
 )
-
 
 // New just creates the Istio receiver services. It is the caller's
 // responsibility to invoke the respective Start*Reception methods as well
@@ -152,7 +149,6 @@ func (ir *Receiver) startInternal() {
 	}
 }
 
-
 // MetricsSource returns the name of the metrics data source.
 func (ir *Receiver) MetricsSource() string {
 	return source
@@ -164,6 +160,7 @@ func (ir *Receiver) handleStreamMetricMessage(payloads []*metricProtoPayload) {
 	}
 
 }
+
 // StartMetricsReception exclusively runs the Metrics receiver on the gRPC server.
 // To start both Trace and Metrics receivers/services, please use Start.
 func (ir *Receiver) StartMetricsReception(ctx context.Context, asyncErrorChan chan<- error) error {
@@ -178,8 +175,7 @@ func (ir *Receiver) StreamMetrics(stream metricspb.MetricsService_StreamMetricsS
 	for {
 		msg, err := stream.Recv()
 		if err == io.EOF {
-			return stream.SendAndClose(&metricspb.StreamMetricsResponse{
-			})
+			return stream.SendAndClose(&metricspb.StreamMetricsResponse{})
 		}
 		pr, ok := peer.FromContext(stream.Context())
 		var clientAddr string
@@ -391,7 +387,7 @@ func (ir *Receiver) toTimeseries(metric *prometheus.MetricFamily) []*ocmetricspb
 		pt, err := ir.toPoint(metric.Type, m)
 		if err != nil {
 			// TODO: count errors
-			continue;
+			continue
 		}
 		ts := &ocmetricspb.TimeSeries{
 			LabelValues:    lv,
@@ -445,7 +441,7 @@ func (ir *Receiver) storeMetric(node *core.Node, metric *prometheus.MetricFamily
 	if ok {
 		db.mf[metric.Name] = metric
 	} else {
-		ir.db[node.Id] = metricsdb{ node: node, mf: map[string]*prometheus.MetricFamily{} }
+		ir.db[node.Id] = metricsdb{node: node, mf: map[string]*prometheus.MetricFamily{}}
 	}
 }
 

@@ -62,6 +62,7 @@ type Receiver struct {
 
 type metricsdb struct {
 	node *core.Node
+	startTime *timestamp.Timestamp
 	mf   map[string]*prometheus.MetricFamily
 }
 
@@ -112,7 +113,7 @@ func New(addr string, mc consumer.MetricsConsumer) (*Receiver, error) {
 
 	ir.db = map[string]metricsdb{}
 	ir.nodeMap = map[string]*core.Node{}
-	
+
 	return ir, nil
 }
 
@@ -121,13 +122,13 @@ func (ir *Receiver) export() {
 	ir.dbMu.Lock()
 	defer ir.dbMu.Unlock()
 
-	prev := ir.db
-	ir.db = map[string]metricsdb{}
-	for id, db := range prev {
+	for id, db := range ir.db {
 		fmt.Printf("Exporting metrics for node %s: count %d\n", id, len(db.mf))
 		md := data.MetricsData{Node: ir.idToNode(db.node)}
-		for _, metric := range db.mf {
-			m, err := ir.metricToOCMetric(metric)
+		prev := db.mf
+		db.mf = map[string]*prometheus.MetricFamily{}
+		for _, metric := range prev {
+			m, err := ir.metricToOCMetric(metric, db.startTime)
 			if err != nil {
 				// TODO: count errors
 				continue
@@ -360,7 +361,7 @@ func (ir *Receiver) histToDist(m *prometheus.Metric) *ocmetricspb.Point_Distribu
 
 func (ir *Receiver) toPoint(mt prometheus.MetricType, m *prometheus.Metric) ([]*ocmetricspb.Point, error) {
 	pts := make([]*ocmetricspb.Point, 0, 0)
-	pt := &ocmetricspb.Point{Timestamp: timeToProtoTimestamp(m.TimestampMs)}
+	pt := &ocmetricspb.Point{Timestamp: msecToProtoTimestamp(m.TimestampMs)}
 
 	switch mt {
 	case prometheus.MetricType_COUNTER:
@@ -376,7 +377,7 @@ func (ir *Receiver) toPoint(mt prometheus.MetricType, m *prometheus.Metric) ([]*
 	return append(pts, pt), nil
 }
 
-func (ir *Receiver) toTimeseries(metric *prometheus.MetricFamily) []*ocmetricspb.TimeSeries {
+func (ir *Receiver) toTimeseries(metric *prometheus.MetricFamily, startTime *timestamp.Timestamp) []*ocmetricspb.TimeSeries {
 
 	tss := make([]*ocmetricspb.TimeSeries, 0, 0)
 	mSlice := metric.GetMetric()
@@ -393,7 +394,7 @@ func (ir *Receiver) toTimeseries(metric *prometheus.MetricFamily) []*ocmetricspb
 		}
 		ts := &ocmetricspb.TimeSeries{
 			LabelValues:    lv,
-			StartTimestamp: timeToProtoTimestamp(m.TimestampMs),
+			StartTimestamp: startTime,
 			Points:         pt,
 		}
 		tss = append(tss, ts)
@@ -401,13 +402,13 @@ func (ir *Receiver) toTimeseries(metric *prometheus.MetricFamily) []*ocmetricspb
 	return tss
 }
 
-func (ir *Receiver) metricToOCMetric(metric *prometheus.MetricFamily) (*ocmetricspb.Metric, error) {
+func (ir *Receiver) metricToOCMetric(metric *prometheus.MetricFamily, startTime *timestamp.Timestamp) (*ocmetricspb.Metric, error) {
 
 	descriptor := ir.toDesc(metric)
 	if descriptor.Type == ocmetricspb.MetricDescriptor_UNSPECIFIED {
 		return nil, fmt.Errorf("descriptor type unspecified %v", descriptor)
 	}
-	timeseries := ir.toTimeseries(metric)
+	timeseries := ir.toTimeseries(metric, startTime)
 
 	ocmetric := &ocmetricspb.Metric{
 		MetricDescriptor: descriptor,
@@ -443,7 +444,14 @@ func (ir *Receiver) storeMetric(node *core.Node, metric *prometheus.MetricFamily
 	if ok {
 		db.mf[metric.Name] = metric
 	} else {
-		ir.db[node.Id] = metricsdb{node: node, mf: map[string]*prometheus.MetricFamily{}}
+		now := time.Now()
+		ir.db[node.Id] = metricsdb{
+			node: node,
+			startTime: &timestamp.Timestamp{
+				Seconds: now.Unix(),
+				Nanos: int32(now.Nanosecond()),
+			},
+			mf: map[string]*prometheus.MetricFamily{}}
 	}
 }
 
@@ -468,7 +476,7 @@ func (ir *Receiver) processStreamMessage(payload *metricProtoPayload) {
 	}
 }
 
-func timeToProtoTimestamp(ms int64) *timestamp.Timestamp {
+func msecToProtoTimestamp(ms int64) *timestamp.Timestamp {
 	return &timestamp.Timestamp{
 		Seconds: int64(ms / 1e3),
 		Nanos:   int32((ms % 1e3) * 1e6),

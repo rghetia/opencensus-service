@@ -66,10 +66,10 @@ func TestMetricToOcMetric(t *testing.T) {
 						Points: []*ocmetricspb.Point{
 							{
 								Value:     &ocmetricspb.Point_DoubleValue{64.5},
-								Timestamp: timeToProtoTimestamp(0),
+								Timestamp: msecToProtoTimestamp(0),
 							},
 						},
-						StartTimestamp: timeToProtoTimestamp(0),
+						StartTimestamp: msecToProtoTimestamp(0),
 						LabelValues: []*ocmetricspb.LabelValue{
 							{
 								Value: "v1",
@@ -115,10 +115,10 @@ func TestMetricToOcMetric(t *testing.T) {
 						Points: []*ocmetricspb.Point{
 							{
 								Value:     &ocmetricspb.Point_DoubleValue{55.5},
-								Timestamp: timeToProtoTimestamp(0),
+								Timestamp: msecToProtoTimestamp(0),
 							},
 						},
-						StartTimestamp: timeToProtoTimestamp(0),
+						StartTimestamp: msecToProtoTimestamp(0),
 						LabelValues: []*ocmetricspb.LabelValue{
 							{
 								Value: "v1",
@@ -197,10 +197,10 @@ func TestMetricToOcMetric(t *testing.T) {
 										},
 									},
 								},
-								Timestamp: timeToProtoTimestamp(0),
+								Timestamp: msecToProtoTimestamp(0),
 							},
 						},
-						StartTimestamp: timeToProtoTimestamp(0),
+						StartTimestamp: msecToProtoTimestamp(0),
 						LabelValues: []*ocmetricspb.LabelValue{
 							{
 								Value: "v1",
@@ -212,7 +212,7 @@ func TestMetricToOcMetric(t *testing.T) {
 		},
 	}
 	for _, tc := range tcs {
-		got, err := ir.metricToOCMetric(&tc.in)
+		got, err := ir.metricToOCMetric(&tc.in, msecToProtoTimestamp(0))
 		if err != nil {
 			t.Fatalf("test %s failed with error %v", tc.name, err)
 		}

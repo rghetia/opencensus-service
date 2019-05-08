@@ -128,7 +128,7 @@ func (ir *Receiver) export() {
 		prev := db.mf
 		db.mf = map[string]*prometheus.MetricFamily{}
 		for _, metric := range prev {
-			m, err := ir.metricToOCMetric(metric, db.startTime)
+			m, err := ir.metricToOCMetric(metric, db.startTime, db.node.Id)
 			if err != nil {
 				// TODO: count errors
 				continue
@@ -286,6 +286,7 @@ func (ir *Receiver) toType(metric *prometheus.MetricFamily) ocmetricspb.MetricDe
 func (ir *Receiver) toLabelKeys(metric *prometheus.MetricFamily) []*ocmetricspb.LabelKey {
 	keys := make([]*ocmetricspb.LabelKey, 0, 0)
 	m := metric.GetMetric()
+	keys = append(keys, &ocmetricspb.LabelKey{Key: "node_id"})
 	for _, first := range m {
 		// TODO: will the label key pair be same for all Metric?
 		labels := first.Label
@@ -377,12 +378,13 @@ func (ir *Receiver) toPoint(mt prometheus.MetricType, m *prometheus.Metric) ([]*
 	return append(pts, pt), nil
 }
 
-func (ir *Receiver) toTimeseries(metric *prometheus.MetricFamily, startTime *timestamp.Timestamp) []*ocmetricspb.TimeSeries {
+func (ir *Receiver) toTimeseries(metric *prometheus.MetricFamily, startTime *timestamp.Timestamp, nodeId string) []*ocmetricspb.TimeSeries {
 
 	tss := make([]*ocmetricspb.TimeSeries, 0, 0)
 	mSlice := metric.GetMetric()
 	for _, m := range mSlice {
 		lv := make([]*ocmetricspb.LabelValue, 0, 0)
+		lv = append(lv, &ocmetricspb.LabelValue{Value: nodeId})
 		labels := m.Label
 		for _, label := range labels {
 			lv = append(lv, &ocmetricspb.LabelValue{Value: label.GetValue()})
@@ -402,13 +404,13 @@ func (ir *Receiver) toTimeseries(metric *prometheus.MetricFamily, startTime *tim
 	return tss
 }
 
-func (ir *Receiver) metricToOCMetric(metric *prometheus.MetricFamily, startTime *timestamp.Timestamp) (*ocmetricspb.Metric, error) {
+func (ir *Receiver) metricToOCMetric(metric *prometheus.MetricFamily, startTime *timestamp.Timestamp, nodeId string) (*ocmetricspb.Metric, error) {
 
 	descriptor := ir.toDesc(metric)
 	if descriptor.Type == ocmetricspb.MetricDescriptor_UNSPECIFIED {
 		return nil, fmt.Errorf("descriptor type unspecified %v", descriptor)
 	}
-	timeseries := ir.toTimeseries(metric, startTime)
+	timeseries := ir.toTimeseries(metric, startTime, nodeId)
 
 	ocmetric := &ocmetricspb.Metric{
 		MetricDescriptor: descriptor,

@@ -26,11 +26,13 @@ func TestMetricToOcMetric(t *testing.T) {
 	ir, _ := New("127.0.0.0:55690", nil)
 	tcs := []struct {
 		name string
+		nodeId string
 		in   prometheus.MetricFamily
 		want ocmetricspb.Metric
 	}{
 		{
 			name: "counter to cumulative",
+			nodeId: "n1",
 			in: prometheus.MetricFamily{
 				Name: "counter1",
 				Type: prometheus.MetricType_COUNTER,
@@ -58,6 +60,7 @@ func TestMetricToOcMetric(t *testing.T) {
 					Name: "counter1",
 					Type: ocmetricspb.MetricDescriptor_CUMULATIVE_DOUBLE,
 					LabelKeys: []*ocmetricspb.LabelKey{
+						{Key: "node_id"},
 						{Key: "k1"},
 					},
 				},
@@ -72,6 +75,9 @@ func TestMetricToOcMetric(t *testing.T) {
 						StartTimestamp: msecToProtoTimestamp(0),
 						LabelValues: []*ocmetricspb.LabelValue{
 							{
+								Value: "n1",
+							},
+							{
 								Value: "v1",
 							},
 						},
@@ -81,6 +87,7 @@ func TestMetricToOcMetric(t *testing.T) {
 		},
 		{
 			name: "counter to cumulative",
+			nodeId: "n2",
 			in: prometheus.MetricFamily{
 				Name: "gauge1",
 				Type: prometheus.MetricType_GAUGE,
@@ -107,6 +114,7 @@ func TestMetricToOcMetric(t *testing.T) {
 					Name: "gauge1",
 					Type: ocmetricspb.MetricDescriptor_GAUGE_DOUBLE,
 					LabelKeys: []*ocmetricspb.LabelKey{
+						{Key: "node_id"},
 						{Key: "k1"},
 					},
 				},
@@ -121,6 +129,9 @@ func TestMetricToOcMetric(t *testing.T) {
 						StartTimestamp: msecToProtoTimestamp(0),
 						LabelValues: []*ocmetricspb.LabelValue{
 							{
+								Value: "n2",
+							},
+							{
 								Value: "v1",
 							},
 						},
@@ -130,6 +141,7 @@ func TestMetricToOcMetric(t *testing.T) {
 		},
 		{
 			name: "counter to cumulative",
+			nodeId: "n3",
 			in: prometheus.MetricFamily{
 				Name: "histogram1",
 				Type: prometheus.MetricType_HISTOGRAM,
@@ -164,6 +176,7 @@ func TestMetricToOcMetric(t *testing.T) {
 					Name: "histogram1",
 					Type: ocmetricspb.MetricDescriptor_CUMULATIVE_DISTRIBUTION,
 					LabelKeys: []*ocmetricspb.LabelKey{
+						{Key: "node_id"},
 						{Key: "k1"},
 					},
 				},
@@ -203,6 +216,9 @@ func TestMetricToOcMetric(t *testing.T) {
 						StartTimestamp: msecToProtoTimestamp(0),
 						LabelValues: []*ocmetricspb.LabelValue{
 							{
+								Value: "n3",
+							},
+							{
 								Value: "v1",
 							},
 						},
@@ -212,7 +228,7 @@ func TestMetricToOcMetric(t *testing.T) {
 		},
 	}
 	for _, tc := range tcs {
-		got, err := ir.metricToOCMetric(&tc.in, msecToProtoTimestamp(0))
+		got, err := ir.metricToOCMetric(&tc.in, msecToProtoTimestamp(0), tc.nodeId)
 		if err != nil {
 			t.Fatalf("test %s failed with error %v", tc.name, err)
 		}

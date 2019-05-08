@@ -133,7 +133,6 @@ func (ir *Receiver) export() {
 				// TODO: count errors
 				continue
 			}
-			fmt.Printf("Metrics: %v\n", m)
 			md.Metrics = append(md.Metrics, m)
 		}
 		ir.metricsConsumer.ConsumeMetricsData(context.Background(), md)

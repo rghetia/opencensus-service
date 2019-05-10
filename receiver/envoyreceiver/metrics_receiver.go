@@ -1,4 +1,4 @@
-// Copyright 2018, OpenCensus Authors
+// Copyright 2019, OpenCensus Authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -33,7 +36,6 @@ import (
 	metricspb "github.com/envoyproxy/go-control-plane/envoy/service/metrics/v2"
 	"github.com/golang/protobuf/ptypes/timestamp"
 	"google.golang.org/api/support/bundler"
-	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc"
 	prometheus "istio.io/gogo-genproto/prometheus"
 )
@@ -62,8 +64,12 @@ type Receiver struct {
 
 type metricsdb struct {
 	node *core.Node
-	startTime *timestamp.Timestamp
-	mf   map[string]*prometheus.MetricFamily
+	mfes map[string]*mfEntry
+}
+
+type mfEntry struct {
+	mf        *prometheus.MetricFamily
+	metricMap map[string]*prometheus.Metric
 }
 
 type metricProtoPayload struct {
@@ -73,12 +79,13 @@ type metricProtoPayload struct {
 }
 
 var (
-	errAlreadyStarted = errors.New("already started")
-	errAlreadyStopped = errors.New("already stopped")
+	errAlreadyStarted          = errors.New("already started")
+	errAlreadyStopped          = errors.New("already stopped")
+	errHistBucketLenNotEqual   = errors.New("histogram bucket length not equal")
+	errHistBucketBoundNotEqual = errors.New("histogram bucket bound not equal")
 )
 
 const (
-	defaultReportingDuration    = 60 * time.Second
 	source                      = "EnvoyReceiver"
 	defaultAddr                 = ":55700"
 	defaultBundleCountThreshold = 300
@@ -117,42 +124,6 @@ func New(addr string, mc consumer.MetricsConsumer) (*Receiver, error) {
 	return ir, nil
 }
 
-func (ir *Receiver) export() {
-	// First copy
-	ir.dbMu.Lock()
-	defer ir.dbMu.Unlock()
-
-	for id, db := range ir.db {
-		fmt.Printf("Exporting metrics for node %s: count %d\n", id, len(db.mf))
-		md := data.MetricsData{Node: ir.idToNode(db.node)}
-		prev := db.mf
-		db.mf = map[string]*prometheus.MetricFamily{}
-		for _, metric := range prev {
-			m, err := ir.metricToOCMetric(metric, db.startTime, db.node.Id)
-			if err != nil {
-				// TODO: count errors
-				continue
-			}
-			fmt.Printf("Metrics: %v\n", m)
-			md.Metrics = append(md.Metrics, m)
-		}
-		ir.metricsConsumer.ConsumeMetricsData(context.Background(), md)
-	}
-}
-
-func (ir *Receiver) startInternal() {
-	for {
-		select {
-		case <-ir.timer.C:
-			ir.export()
-		case <-ir.quit:
-			ir.timer.Stop()
-			ir.done <- true
-			return
-		}
-	}
-}
-
 // MetricsSource returns the name of the metrics data source.
 func (ir *Receiver) MetricsSource() string {
 	return source
@@ -176,25 +147,36 @@ func (ir *Receiver) StartMetricsReception(ctx context.Context, asyncErrorChan ch
 }
 
 func (ir *Receiver) StreamMetrics(stream metricspb.MetricsService_StreamMetricsServer) error {
+	var node *core.Node
 	for {
 		msg, err := stream.Recv()
 		if err == io.EOF {
 			return stream.SendAndClose(&metricspb.StreamMetricsResponse{})
 		}
-		pr, ok := peer.FromContext(stream.Context())
-		var clientAddr string
-		if ok {
-			clientAddr = pr.Addr.String()
-		} else {
-			clientAddr = "unknown"
-		}
+		//pr, ok := peer.FromContext(stream.Context())
+		//var clientAddr string
+		//if ok {
+		//	clientAddr = pr.Addr.String()
+		//} else {
+		//	clientAddr = "unknown"
+		//}
 
-		payload := &metricProtoPayload{
-			ctx:        stream.Context(),
-			clientAddr: clientAddr,
-			msg:        msg,
+		if node == nil {
+			id := msg.GetIdentifier()
+			if id != nil && id.Node != nil {
+				node = id.Node
+				log.Printf("initialize node-id %s", node.Id)
+			}
 		}
-		ir.protoMetricsBundler.Add(payload, 1)
+		if node != nil {
+			ir.compareAndExport(node, msg.GetEnvoyMetrics())
+		}
+		//payload := &metricProtoPayload{
+		//	ctx:        stream.Context(),
+		//	clientAddr: clientAddr,
+		//	msg:        msg,
+		//}
+		//ir.protoMetricsBundler.Add(payload, 1)
 	}
 }
 
@@ -256,13 +238,6 @@ func (ir *Receiver) startServer() error {
 			// No error otherwise returned in the period of 1s.
 			// We can assume that the serve is at least running.
 			err = nil
-
-			//Start export timer.
-			ir.timer = time.NewTicker(defaultReportingDuration)
-			ir.quit = make(chan bool)
-			ir.done = make(chan bool)
-
-			ir.startInternal()
 		}
 	})
 	return err
@@ -379,45 +354,24 @@ func (ir *Receiver) toPoint(mt prometheus.MetricType, m *prometheus.Metric) ([]*
 	return append(pts, pt), nil
 }
 
-func (ir *Receiver) toTimeseries(metric *prometheus.MetricFamily, startTime *timestamp.Timestamp, nodeId string) []*ocmetricspb.TimeSeries {
-
-	tss := make([]*ocmetricspb.TimeSeries, 0, 0)
-	mSlice := metric.GetMetric()
-	for _, m := range mSlice {
-		lv := make([]*ocmetricspb.LabelValue, 0, 0)
-		lv = append(lv, &ocmetricspb.LabelValue{Value: nodeId})
-		labels := m.Label
-		for _, label := range labels {
-			lv = append(lv, &ocmetricspb.LabelValue{Value: label.GetValue()})
-		}
-		pt, err := ir.toPoint(metric.Type, m)
-		if err != nil {
-			// TODO: count errors
-			continue
-		}
-		ts := &ocmetricspb.TimeSeries{
-			LabelValues:    lv,
-			StartTimestamp: startTime,
-			Points:         pt,
-		}
-		tss = append(tss, ts)
+func (ir *Receiver) toOneTimeseries(mf *prometheus.MetricFamily, m *prometheus.Metric, startTime int64, nodeId string) (*ocmetricspb.TimeSeries, error) {
+	lv := make([]*ocmetricspb.LabelValue, 0, 0)
+	lv = append(lv, &ocmetricspb.LabelValue{Value: nodeId})
+	labels := m.Label
+	for _, label := range labels {
+		lv = append(lv, &ocmetricspb.LabelValue{Value: label.GetValue()})
 	}
-	return tss
-}
-
-func (ir *Receiver) metricToOCMetric(metric *prometheus.MetricFamily, startTime *timestamp.Timestamp, nodeId string) (*ocmetricspb.Metric, error) {
-
-	descriptor := ir.toDesc(metric)
-	if descriptor.Type == ocmetricspb.MetricDescriptor_UNSPECIFIED {
-		return nil, fmt.Errorf("descriptor type unspecified %v", descriptor)
+	pt, err := ir.toPoint(mf.Type, m)
+	if err != nil {
+		// TODO: count errors
+		return nil, err
 	}
-	timeseries := ir.toTimeseries(metric, startTime, nodeId)
-
-	ocmetric := &ocmetricspb.Metric{
-		MetricDescriptor: descriptor,
-		Timeseries:       timeseries,
+	ts := &ocmetricspb.TimeSeries{
+		LabelValues:    lv,
+		StartTimestamp: msecToProtoTimestamp(startTime),
+		Points:         pt,
 	}
-	return ocmetric, nil
+	return ts, nil
 }
 
 func (ir *Receiver) idToNode(n *core.Node) *commonpb.Node {
@@ -432,6 +386,13 @@ func (ir *Receiver) idToNode(n *core.Node) *commonpb.Node {
 
 func (ir *Receiver) addNodeID(clientAddr string, node *core.Node) {
 	ir.nodeMap[clientAddr] = node
+	_, ok := ir.db[node.Id]
+	if !ok {
+		ir.db[node.Id] = metricsdb{
+			node: node,
+			mfes: map[string]*mfEntry{},
+		}
+	}
 }
 
 func (ir *Receiver) getNodeID(clientAddr string) *core.Node {
@@ -442,20 +403,103 @@ func (ir *Receiver) getNodeID(clientAddr string) *core.Node {
 	return nil
 }
 
-func (ir *Receiver) storeMetric(node *core.Node, metric *prometheus.MetricFamily) {
-	db, ok := ir.db[node.Id]
-	if ok {
-		db.mf[metric.Name] = metric
-	} else {
-		now := time.Now()
-		ir.db[node.Id] = metricsdb{
-			node: node,
-			startTime: &timestamp.Timestamp{
-				Seconds: now.Unix(),
-				Nanos: int32(now.Nanosecond()),
-			},
-			mf: map[string]*prometheus.MetricFamily{}}
+// metricSignature creates a unique signature consisting of a
+// metric's type and its lexicographically sorted label values
+func metricSignature(metric *prometheus.Metric) string {
+	labels := metric.Label
+	labelValues := make([]string, 0, len(labels))
+
+	for _, label := range labels {
+		labelValues = append(labelValues, label.Value)
 	}
+	sort.Strings(labelValues)
+	return fmt.Sprintf("%s", strings.Join(labelValues, ","))
+}
+
+func (ir *Receiver) computeDiff(first, curr *prometheus.Metric, metricType prometheus.MetricType) error {
+
+	switch(metricType) {
+	case prometheus.MetricType_COUNTER:
+		curr.Counter.Value = curr.Counter.Value - first.Counter.Value
+	case prometheus.MetricType_HISTOGRAM:
+		if len(first.Histogram.Bucket) != len(curr.Histogram.Bucket) {
+			// TODO: count errors
+			return errHistBucketLenNotEqual
+		}
+		for i, _ := range curr.Histogram.Bucket {
+			if curr.Histogram.Bucket[i].UpperBound != first.Histogram.Bucket[i].UpperBound {
+				return errHistBucketLenNotEqual
+			}
+			// TODO: what if curr value is less than first? Reset
+			curr.Histogram.Bucket[i].CumulativeCount = curr.Histogram.Bucket[i].CumulativeCount -
+				first.Histogram.Bucket[i].CumulativeCount
+		}
+		curr.Histogram.SampleSum = curr.Histogram.SampleSum - first.Histogram.SampleSum
+		curr.Histogram.SampleCount = curr.Histogram.SampleCount - first.Histogram.SampleCount
+	default:
+	}
+	return nil
+}
+
+func (ir *Receiver) addOrGetMfe(node *core.Node, mf *prometheus.MetricFamily) *mfEntry {
+	db, _ := ir.db[node.Id]
+	mfe, ok := db.mfes[mf.Name]
+	if !ok {
+		//save first
+		mfe = &mfEntry{mf: mf, metricMap: map[string]*prometheus.Metric{}}
+		db.mfes[mf.Name] = mfe
+	}
+	return mfe
+}
+
+func (ir *Receiver) compareAndExport(node *core.Node, mfs []*prometheus.MetricFamily) error {
+	md := data.MetricsData{Node: ir.idToNode(node)}
+	ocmetrics := make([]*ocmetricspb.Metric, 0)
+	tsCount := 0
+	for _, mf := range mfs {
+		mfe := ir.addOrGetMfe(node, mf)
+
+		descriptor := ir.toDesc(mf)
+		if descriptor.Type == ocmetricspb.MetricDescriptor_UNSPECIFIED {
+			// TODO: [rghetia] Count errors
+			continue
+		}
+		tss := make([]*ocmetricspb.TimeSeries, 0, 0)
+
+		for _, metric := range mf.Metric {
+			key := metricSignature(metric)
+			first, ok := mfe.metricMap[key]
+			if ok {
+				// compute diff
+				err := ir.computeDiff(first, metric, mf.Type)
+				if err != nil {
+					// TODO [rghetia] count errors
+				}
+				ts, err := ir.toOneTimeseries(mf, metric, first.TimestampMs, node.Id)
+				if err != nil {
+					// TODO [rghetia] count errors
+				}
+				tss = append(tss, ts)
+			} else {
+				mfe.metricMap[key] = metric
+			}
+		}
+		if len(tss) > 0 {
+			ocmetric := &ocmetricspb.Metric{
+				MetricDescriptor: descriptor,
+				Timeseries:       tss,
+			}
+			ocmetrics = append(ocmetrics, ocmetric)
+			tsCount += len(tss)
+		}
+	}
+	if len(ocmetrics) > 0 {
+		md.Metrics = ocmetrics
+		ir.metricsConsumer.ConsumeMetricsData(context.Background(), md)
+		log.Printf("Exporting for node:%s, timeseries:%d, metrics:%d\n",
+			node.Id, tsCount, len(ocmetrics))
+	}
+	return nil
 }
 
 func (ir *Receiver) processStreamMessage(payload *metricProtoPayload) {
@@ -474,9 +518,7 @@ func (ir *Receiver) processStreamMessage(payload *metricProtoPayload) {
 		return
 	}
 	metrics := payload.msg.GetEnvoyMetrics()
-	for _, metric := range metrics {
-		ir.storeMetric(node, metric)
-	}
+	ir.compareAndExport(node, metrics)
 }
 
 func msecToProtoTimestamp(ms int64) *timestamp.Timestamp {

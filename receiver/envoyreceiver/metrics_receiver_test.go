@@ -228,12 +228,19 @@ func TestMetricToOcMetric(t *testing.T) {
 		},
 	}
 	for _, tc := range tcs {
-		got, err := ir.metricToOCMetric(&tc.in, msecToProtoTimestamp(0), tc.nodeId)
-		if err != nil {
-			t.Fatalf("test %s failed with error %v", tc.name, err)
+		gotDesc := ir.toDesc(&tc.in)
+		if !cmp.Equal(gotDesc, tc.want.MetricDescriptor) {
+			t.Fatalf("test descriptor %s:\n got=%v\n want=%v\n", tc.name, *gotDesc, tc.want.MetricDescriptor)
 		}
-		if !cmp.Equal(*got, tc.want) {
-			t.Fatalf("test %s:\n got=%v\n want=%v\n", tc.name, *got, tc.want)
+		for i, metric := range tc.in.Metric {
+			gotTs, err := ir.toOneTimeseries(&tc.in, metric, 0, tc.nodeId)
+			if err != nil {
+				t.Fatalf("test %s failed with error %v", tc.name, err)
+			}
+			wantTs := tc.want.Timeseries[i]
+			if !cmp.Equal(gotTs, tc.want.Timeseries[i]) {
+				t.Fatalf("test timeseries %s:\n got=%v\n want=%v\n", tc.name, gotTs, wantTs)
+			}
 		}
 	}
 }

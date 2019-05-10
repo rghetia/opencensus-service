@@ -147,7 +147,7 @@ func (ir *Receiver) StartMetricsReception(ctx context.Context, asyncErrorChan ch
 }
 
 func (ir *Receiver) StreamMetrics(stream metricspb.MetricsService_StreamMetricsServer) error {
-	var node *core.Node
+	var db *metricsdb
 	for {
 		msg, err := stream.Recv()
 		if err == io.EOF {
@@ -161,15 +161,18 @@ func (ir *Receiver) StreamMetrics(stream metricspb.MetricsService_StreamMetricsS
 		//	clientAddr = "unknown"
 		//}
 
-		if node == nil {
+		if db == nil {
 			id := msg.GetIdentifier()
 			if id != nil && id.Node != nil {
-				node = id.Node
-				log.Printf("initialize node-id %s", node.Id)
+				db = &metricsdb{
+					node: id.Node,
+					mfes: map[string]*mfEntry{},
+				}
+				log.Printf("initialize node-id %s", db.node.Id)
 			}
 		}
-		if node != nil {
-			ir.compareAndExport(node, msg.GetEnvoyMetrics())
+		if db != nil {
+			ir.compareAndExport(db, msg.GetEnvoyMetrics())
 		}
 		//payload := &metricProtoPayload{
 		//	ctx:        stream.Context(),
@@ -385,7 +388,7 @@ func (ir *Receiver) idToNode(n *core.Node) *commonpb.Node {
 }
 
 func (ir *Receiver) addNodeID(clientAddr string, node *core.Node) {
-	ir.nodeMap[clientAddr] = node
+	//ir.nodeMap[clientAddr] = node
 	_, ok := ir.db[node.Id]
 	if !ok {
 		ir.db[node.Id] = metricsdb{
@@ -441,8 +444,7 @@ func (ir *Receiver) computeDiff(first, curr *prometheus.Metric, metricType prome
 	return nil
 }
 
-func (ir *Receiver) addOrGetMfe(node *core.Node, mf *prometheus.MetricFamily) *mfEntry {
-	db, _ := ir.db[node.Id]
+func (ir *Receiver) addOrGetMfe(db *metricsdb, mf *prometheus.MetricFamily) *mfEntry {
 	mfe, ok := db.mfes[mf.Name]
 	if !ok {
 		//save first
@@ -452,12 +454,12 @@ func (ir *Receiver) addOrGetMfe(node *core.Node, mf *prometheus.MetricFamily) *m
 	return mfe
 }
 
-func (ir *Receiver) compareAndExport(node *core.Node, mfs []*prometheus.MetricFamily) error {
-	md := data.MetricsData{Node: ir.idToNode(node)}
+func (ir *Receiver) compareAndExport(db *metricsdb, mfs []*prometheus.MetricFamily) error {
+	md := data.MetricsData{Node: ir.idToNode(db.node)}
 	ocmetrics := make([]*ocmetricspb.Metric, 0)
 	tsCount := 0
 	for _, mf := range mfs {
-		mfe := ir.addOrGetMfe(node, mf)
+		mfe := ir.addOrGetMfe(db, mf)
 
 		descriptor := ir.toDesc(mf)
 		if descriptor.Type == ocmetricspb.MetricDescriptor_UNSPECIFIED {
@@ -475,7 +477,7 @@ func (ir *Receiver) compareAndExport(node *core.Node, mfs []*prometheus.MetricFa
 				if err != nil {
 					// TODO [rghetia] count errors
 				}
-				ts, err := ir.toOneTimeseries(mf, metric, first.TimestampMs, node.Id)
+				ts, err := ir.toOneTimeseries(mf, metric, first.TimestampMs, db.node.Id)
 				if err != nil {
 					// TODO [rghetia] count errors
 				}
@@ -497,28 +499,28 @@ func (ir *Receiver) compareAndExport(node *core.Node, mfs []*prometheus.MetricFa
 		md.Metrics = ocmetrics
 		ir.metricsConsumer.ConsumeMetricsData(context.Background(), md)
 		log.Printf("Exporting for node:%s, timeseries:%d, metrics:%d\n",
-			node.Id, tsCount, len(ocmetrics))
+			db.node.Id, tsCount, len(ocmetrics))
 	}
 	return nil
 }
 
 func (ir *Receiver) processStreamMessage(payload *metricProtoPayload) {
-	ir.dbMu.Lock()
-	defer ir.dbMu.Unlock()
-
-	id := payload.msg.GetIdentifier()
-	if id != nil && id.Node != nil {
-		ir.addNodeID(payload.clientAddr, id.Node)
-	}
-
-	node := ir.getNodeID(payload.clientAddr)
-	if node == nil {
-		// should never happen
-		fmt.Errorf("Received metrics without node info from %s", payload.clientAddr)
-		return
-	}
-	metrics := payload.msg.GetEnvoyMetrics()
-	ir.compareAndExport(node, metrics)
+	//ir.dbMu.Lock()
+	//defer ir.dbMu.Unlock()
+	//
+	//id := payload.msg.GetIdentifier()
+	//if id != nil && id.Node != nil {
+	//	ir.addNodeID(payload.clientAddr, id.Node)
+	//}
+	//
+	//node := ir.getNodeID(payload.clientAddr)
+	//if node == nil {
+	//	// should never happen
+	//	fmt.Errorf("Received metrics without node info from %s", payload.clientAddr)
+	//	return
+	//}
+	//metrics := payload.msg.GetEnvoyMetrics()
+	//ir.compareAndExport(node, metrics)
 }
 
 func msecToProtoTimestamp(ms int64) *timestamp.Timestamp {

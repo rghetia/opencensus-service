@@ -478,13 +478,13 @@ func (ir *Receiver) compareAndExport(db *metricsdb, mfs []*prometheus.MetricFami
 				err := ir.computeDiff(first, metric, mf.Type)
 				if err != nil {
 					// TODO [rghetia] count errors
-					fmt.Printf("computeDiff error: %s-%s %v\n", mf.Name, key, err)
+					log.Printf("computeDiff error: %s-%s %v\n", mf.Name, key, err)
 					continue
 				}
 				ts, err := ir.toOneTimeseries(mf, metric, first.TimestampMs, db.node.Id)
 				if err != nil {
 					// TODO [rghetia] count errors
-					fmt.Printf("toOneTimeseries error: %s-%s %v\n", mf.Name, key, err)
+					log.Printf("toOneTimeseries error: %s-%s %v\n", mf.Name, key, err)
 					continue
 				}
 				tss = append(tss, ts)

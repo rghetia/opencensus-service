@@ -350,8 +350,10 @@ func (ir *Receiver) toPoint(mt prometheus.MetricType, m *prometheus.Metric) ([]*
 		pt.Value = &ocmetricspb.Point_DoubleValue{DoubleValue: m.Gauge.GetValue()}
 	case prometheus.MetricType_HISTOGRAM:
 		pt.Value = ir.histToDist(m)
-	default:
+	case prometheus.MetricType_SUMMARY:
 		// TODO: add support for summary type
+		return nil, fmt.Errorf("summary %v", m)
+	default:
 		return nil, fmt.Errorf("unsupported metric type %v", mt)
 	}
 	return append(pts, pt), nil
@@ -476,10 +478,14 @@ func (ir *Receiver) compareAndExport(db *metricsdb, mfs []*prometheus.MetricFami
 				err := ir.computeDiff(first, metric, mf.Type)
 				if err != nil {
 					// TODO [rghetia] count errors
+					fmt.Printf("computeDiff error: %s-%s %v\n", mf.Name, key, err)
+					continue
 				}
 				ts, err := ir.toOneTimeseries(mf, metric, first.TimestampMs, db.node.Id)
 				if err != nil {
 					// TODO [rghetia] count errors
+					fmt.Printf("toOneTimeseries error: %s-%s %v\n", mf.Name, key, err)
+					continue
 				}
 				tss = append(tss, ts)
 			} else {
@@ -499,6 +505,9 @@ func (ir *Receiver) compareAndExport(db *metricsdb, mfs []*prometheus.MetricFami
 		md.Metrics = ocmetrics
 		ir.metricsConsumer.ConsumeMetricsData(context.Background(), md)
 		log.Printf("Exporting for node:%s, timeseries:%d, metrics:%d\n",
+			db.node.Id, tsCount, len(ocmetrics))
+	} else {
+		log.Printf("Not exporting for node:%s, timeseries:%d, metrics:%d\n",
 			db.node.Id, tsCount, len(ocmetrics))
 	}
 	return nil

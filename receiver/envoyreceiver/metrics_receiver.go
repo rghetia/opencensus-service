@@ -466,6 +466,7 @@ func (ir *Receiver) compareAndExport(db *metricsdb, mfs []*prometheus.MetricFami
 		descriptor := ir.toDesc(mf)
 		if descriptor.Type == ocmetricspb.MetricDescriptor_UNSPECIFIED {
 			// TODO: [rghetia] Count errors
+			log.Printf("unspecified type %v\n", mf)
 			continue
 		}
 		tss := make([]*ocmetricspb.TimeSeries, 0, 0)

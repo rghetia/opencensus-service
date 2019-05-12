@@ -53,13 +53,6 @@ type Receiver struct {
 	stopOnce                 sync.Once
 	startServerOnce          sync.Once
 	startMetricsReceiverOnce sync.Once
-
-	nodeMap map[string]*core.Node
-	db      map[string]metricsdb
-	dbMu    sync.RWMutex
-
-	timer      *time.Ticker
-	quit, done chan bool
 }
 
 type metricsdb struct {
@@ -72,12 +65,6 @@ type mfEntry struct {
 	metricMap map[string]*prometheus.Metric
 }
 
-type metricProtoPayload struct {
-	ctx        context.Context
-	clientAddr string
-	msg        *metricspb.StreamMetricsMessage
-}
-
 var (
 	errAlreadyStarted          = errors.New("already started")
 	errAlreadyStopped          = errors.New("already stopped")
@@ -88,11 +75,9 @@ var (
 const (
 	source                      = "EnvoyReceiver"
 	defaultAddr                 = ":55700"
-	defaultBundleCountThreshold = 300
-	defaultBundleDelayThreshold = 10
 )
 
-// New just creates the Istio receiver services. It is the caller's
+// New just creates the Envoy receiver services. It is the caller's
 // responsibility to invoke the respective Start*Reception methods as well
 // as the various Stop*Reception methods or simply Stop to end it.
 func New(addr string, mc consumer.MetricsConsumer) (*Receiver, error) {
@@ -109,31 +94,12 @@ func New(addr string, mc consumer.MetricsConsumer) (*Receiver, error) {
 	}
 
 	ir.metricsConsumer = mc
-
-	ir.protoMetricsBundler = bundler.NewBundler((*metricProtoPayload)(nil), func(bundle interface{}) {
-		payloads := bundle.([]*metricProtoPayload)
-		ir.handleStreamMetricMessage(payloads)
-	})
-	// TODO: provide option to set bundle options.
-	ir.protoMetricsBundler.BundleCountThreshold = defaultBundleCountThreshold
-	ir.protoMetricsBundler.DelayThreshold = defaultBundleDelayThreshold
-
-	ir.db = map[string]metricsdb{}
-	ir.nodeMap = map[string]*core.Node{}
-
 	return ir, nil
 }
 
 // MetricsSource returns the name of the metrics data source.
 func (ir *Receiver) MetricsSource() string {
 	return source
-}
-
-func (ir *Receiver) handleStreamMetricMessage(payloads []*metricProtoPayload) {
-	for _, payload := range payloads {
-		ir.processStreamMessage(payload)
-	}
-
 }
 
 // StartMetricsReception exclusively runs the Metrics receiver on the gRPC server.
@@ -153,13 +119,6 @@ func (ir *Receiver) StreamMetrics(stream metricspb.MetricsService_StreamMetricsS
 		if err == io.EOF {
 			return stream.SendAndClose(&metricspb.StreamMetricsResponse{})
 		}
-		//pr, ok := peer.FromContext(stream.Context())
-		//var clientAddr string
-		//if ok {
-		//	clientAddr = pr.Addr.String()
-		//} else {
-		//	clientAddr = "unknown"
-		//}
 
 		if db == nil {
 			id := msg.GetIdentifier()
@@ -174,12 +133,6 @@ func (ir *Receiver) StreamMetrics(stream metricspb.MetricsService_StreamMetricsS
 		if db != nil {
 			ir.compareAndExport(db, msg.GetEnvoyMetrics())
 		}
-		//payload := &metricProtoPayload{
-		//	ctx:        stream.Context(),
-		//	clientAddr: clientAddr,
-		//	msg:        msg,
-		//}
-		//ir.protoMetricsBundler.Add(payload, 1)
 	}
 }
 
@@ -211,15 +164,6 @@ func (ir *Receiver) StopMetricsReception(ctx context.Context) error {
 	// StopMetricsReception is a noop currently.
 	// TODO: (@odeke-em) investigate whether or not gRPC
 	// provides a way to stop specific services.
-
-	if ir.quit == nil {
-		return nil
-	}
-	ir.quit <- true
-	<-ir.done
-	close(ir.quit)
-	close(ir.done)
-	ir.quit = nil
 	return nil
 }
 
@@ -380,32 +324,13 @@ func (ir *Receiver) toOneTimeseries(mf *prometheus.MetricFamily, m *prometheus.M
 }
 
 func (ir *Receiver) idToNode(n *core.Node) *commonpb.Node {
-	// TODD: figure want how to map istio node to OC Agent node.
+	// TODD: figure want how to map envoy node to OC Agent node.
 	node := &commonpb.Node{
 		Identifier:  &commonpb.ProcessIdentifier{HostName: n.Id},
 		LibraryInfo: &commonpb.LibraryInfo{},
 		ServiceInfo: &commonpb.ServiceInfo{},
 	}
 	return node
-}
-
-func (ir *Receiver) addNodeID(clientAddr string, node *core.Node) {
-	//ir.nodeMap[clientAddr] = node
-	_, ok := ir.db[node.Id]
-	if !ok {
-		ir.db[node.Id] = metricsdb{
-			node: node,
-			mfes: map[string]*mfEntry{},
-		}
-	}
-}
-
-func (ir *Receiver) getNodeID(clientAddr string) *core.Node {
-	id, ok := ir.nodeMap[clientAddr]
-	if ok {
-		return id
-	}
-	return nil
 }
 
 // metricSignature creates a unique signature consisting of a
@@ -512,25 +437,6 @@ func (ir *Receiver) compareAndExport(db *metricsdb, mfs []*prometheus.MetricFami
 			db.node.Id, tsCount, len(ocmetrics))
 	}
 	return nil
-}
-
-func (ir *Receiver) processStreamMessage(payload *metricProtoPayload) {
-	//ir.dbMu.Lock()
-	//defer ir.dbMu.Unlock()
-	//
-	//id := payload.msg.GetIdentifier()
-	//if id != nil && id.Node != nil {
-	//	ir.addNodeID(payload.clientAddr, id.Node)
-	//}
-	//
-	//node := ir.getNodeID(payload.clientAddr)
-	//if node == nil {
-	//	// should never happen
-	//	fmt.Errorf("Received metrics without node info from %s", payload.clientAddr)
-	//	return
-	//}
-	//metrics := payload.msg.GetEnvoyMetrics()
-	//ir.compareAndExport(node, metrics)
 }
 
 func msecToProtoTimestamp(ms int64) *timestamp.Timestamp {

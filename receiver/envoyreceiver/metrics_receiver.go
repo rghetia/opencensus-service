@@ -31,6 +31,7 @@ import (
 
 	commonpb "github.com/census-instrumentation/opencensus-proto/gen-go/agent/common/v1"
 	ocmetricspb "github.com/census-instrumentation/opencensus-proto/gen-go/metrics/v1"
+	resourcepb "github.com/census-instrumentation/opencensus-proto/gen-go/resource/v1"
 	"github.com/census-instrumentation/opencensus-service/data"
 	"github.com/envoyproxy/go-control-plane/envoy/api/v2/core"
 	metricspb "github.com/envoyproxy/go-control-plane/envoy/service/metrics/v2"
@@ -381,6 +382,25 @@ func (ir *Receiver) addOrGetMfe(db *metricsdb, mf *prometheus.MetricFamily) *mfE
 	return mfe
 }
 
+func (ir *Receiver) toResource(db *metricsdb) *resourcepb.Resource {
+	r := &resourcepb.Resource{}
+	r.Labels = map[string]string{}
+	metadata := db.node.Metadata
+	if metadata != nil {
+		for k, v := range metadata.Fields {
+			switch k {
+			case "CONFIG_NAMESPACE":
+				r.Labels["k8s.namespace.name"] = v.GetStringValue()
+			case "POD_NAME":
+				r.Labels["k8s.pod.name"] = v.GetStringValue()
+			case "app":
+			}
+		}
+
+	}
+	r.Labels["k8s.cluster.name"] = db.node.GetCluster()
+	return r
+}
 func (ir *Receiver) compareAndExport(db *metricsdb, mfs []*prometheus.MetricFamily) error {
 	md := data.MetricsData{Node: ir.idToNode(db.node)}
 	ocmetrics := make([]*ocmetricspb.Metric, 0)
@@ -422,6 +442,7 @@ func (ir *Receiver) compareAndExport(db *metricsdb, mfs []*prometheus.MetricFami
 			ocmetric := &ocmetricspb.Metric{
 				MetricDescriptor: descriptor,
 				Timeseries:       tss,
+				Resource: ir.toResource(db),
 			}
 			ocmetrics = append(ocmetrics, ocmetric)
 			tsCount += len(tss)

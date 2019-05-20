@@ -445,6 +445,9 @@ func (ir *Receiver) compareAndExport(db *metricsdb, mfs []*prometheus.MetricFami
 				Resource: ir.toResource(db),
 			}
 			ocmetrics = append(ocmetrics, ocmetric)
+			if mf.Type == prometheus.MetricType_COUNTER {
+				log.Printf("Counter: envoy: %v\n, oc: %v\n", mf, ocmetric)
+			}
 			tsCount += len(tss)
 		}
 	}

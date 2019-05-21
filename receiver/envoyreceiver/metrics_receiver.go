@@ -463,23 +463,24 @@ func (ir *Receiver) addOrGetMfe(db *metricsdb, mf *prometheus.MetricFamily) *mfE
 }
 
 func (ir *Receiver) toResource(db *metricsdb) *resourcepb.Resource {
-	r := &resourcepb.Resource{}
-	r.Labels = map[string]string{}
-	metadata := db.node.Metadata
-	if metadata != nil {
-		for k, v := range metadata.Fields {
-			switch k {
-			case "CONFIG_NAMESPACE":
-				r.Labels["k8s.namespace.name"] = v.GetStringValue()
-			case "POD_NAME":
-				r.Labels["k8s.pod.name"] = v.GetStringValue()
-			case "app":
-			}
-		}
-
-	}
-	r.Labels["k8s.cluster.name"] = db.node.GetCluster()
-	return r
+	return nil
+	//r := &resourcepb.Resource{}
+	//r.Labels = map[string]string{}
+	//metadata := db.node.Metadata
+	//if metadata != nil {
+	//	for k, v := range metadata.Fields {
+	//		switch k {
+	//		case "CONFIG_NAMESPACE":
+	//			r.Labels["k8s.namespace.name"] = v.GetStringValue()
+	//		case "POD_NAME":
+	//			r.Labels["k8s.pod.name"] = v.GetStringValue()
+	//		case "app":
+	//		}
+	//	}
+	//
+	//}
+	//r.Labels["k8s.cluster.name"] = db.node.GetCluster()
+	//return r
 }
 func (ir *Receiver) compareAndExport(db *metricsdb, mfs []*prometheus.MetricFamily) error {
 	md := data.MetricsData{Node: ir.idToNode(db.node)}

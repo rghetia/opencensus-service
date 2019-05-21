@@ -36,6 +36,7 @@ import (
 	"github.com/envoyproxy/go-control-plane/envoy/api/v2/core"
 	metricspb "github.com/envoyproxy/go-control-plane/envoy/service/metrics/v2"
 	"github.com/golang/protobuf/ptypes/timestamp"
+	"github.com/golang/protobuf/ptypes/wrappers"
 	"google.golang.org/api/support/bundler"
 	"google.golang.org/grpc"
 	prometheus "istio.io/gogo-genproto/prometheus"
@@ -204,7 +205,7 @@ func (ir *Receiver) toType(metric *prometheus.MetricFamily) ocmetricspb.MetricDe
 	case prometheus.MetricType_HISTOGRAM:
 		return ocmetricspb.MetricDescriptor_CUMULATIVE_DISTRIBUTION
 	case prometheus.MetricType_SUMMARY:
-		//TODO: when summary is supported.
+		//return ocmetricspb.MetricDescriptor_SUMMARY
 		return ocmetricspb.MetricDescriptor_UNSPECIFIED
 	default:
 		return ocmetricspb.MetricDescriptor_UNSPECIFIED
@@ -309,6 +310,42 @@ func (ir *Receiver) toDesc(metric *prometheus.MetricFamily, mfe *mfEntry) *ocmet
 	return desc
 }
 
+func (ir *Receiver) sumToSum(m *prometheus.Metric) *ocmetricspb.Point_SummaryValue {
+	var count uint64
+	var sum float64
+	if m.Summary.SampleCount > 0 {
+		count = m.Summary.SampleCount
+		sum = m.Summary.SampleSum
+	} else {
+		count = 0
+		sum = 0
+	}
+	quantiles := m.Summary.GetQuantile()
+	valueAtPercentiles := make([]*ocmetricspb.SummaryValue_Snapshot_ValueAtPercentile, len(quantiles)+1)
+	idx := 0
+	for _, b := range quantiles {
+		valueAtPercentiles[idx] = &ocmetricspb.SummaryValue_Snapshot_ValueAtPercentile{
+			Percentile: b.Quantile,
+			Value: b.Value,
+		}
+		idx++
+	}
+	dv := &ocmetricspb.Point_SummaryValue{
+		SummaryValue: &ocmetricspb.SummaryValue{
+			Snapshot: &ocmetricspb.SummaryValue_Snapshot{
+				PercentileValues: valueAtPercentiles,
+			},
+			Sum:   &wrappers.DoubleValue{
+				Value: sum,
+			},
+			Count: &wrappers.Int64Value{
+				Value: int64(count),
+			},
+		}}
+	return dv
+}
+
+
 func (ir *Receiver) histToDist(m *prometheus.Metric) *ocmetricspb.Point_DistributionValue {
 	var count uint64
 	var sum float64
@@ -372,8 +409,7 @@ func (ir *Receiver) toPoint(mt prometheus.MetricType, m *prometheus.Metric) ([]*
 	case prometheus.MetricType_HISTOGRAM:
 		pt.Value = ir.histToDist(m)
 	case prometheus.MetricType_SUMMARY:
-		// TODO: add support for summary type
-		return nil, fmt.Errorf("summary %v", m)
+		pt.Value = ir.sumToSum(m)
 	default:
 		return nil, fmt.Errorf("unsupported metric type %v", mt)
 	}
@@ -446,6 +482,9 @@ func (ir *Receiver) computeDiff(first, curr *prometheus.Metric, metricType prome
 		}
 		curr.Histogram.SampleSum = curr.Histogram.SampleSum - first.Histogram.SampleSum
 		curr.Histogram.SampleCount = curr.Histogram.SampleCount - first.Histogram.SampleCount
+	case prometheus.MetricType_SUMMARY:
+		curr.Summary.SampleCount = curr.Summary.SampleCount - first.Summary.SampleCount
+		curr.Summary.SampleSum = curr.Summary.SampleSum - first.Summary.SampleSum
 	default:
 	}
 	return nil

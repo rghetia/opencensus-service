@@ -62,8 +62,12 @@ type metricsdb struct {
 }
 
 type mfEntry struct {
-	mf        *prometheus.MetricFamily
-	metricMap map[string]*prometheus.Metric
+	mf          *prometheus.MetricFamily
+	metricMap   map[string]*prometheus.Metric
+	rename      bool
+	name        string
+	labelKeys   []*ocmetricspb.LabelKey
+	labelValues []*ocmetricspb.LabelValue
 }
 
 var (
@@ -74,8 +78,8 @@ var (
 )
 
 const (
-	source                      = "EnvoyReceiver"
-	defaultAddr                 = ":55700"
+	source      = "EnvoyReceiver"
+	defaultAddr = ":55700"
 )
 
 // New just creates the Envoy receiver services. It is the caller's
@@ -222,13 +226,85 @@ func (ir *Receiver) toLabelKeys(metric *prometheus.MetricFamily) []*ocmetricspb.
 	return keys
 }
 
-func (ir *Receiver) toDesc(metric *prometheus.MetricFamily) *ocmetricspb.MetricDescriptor {
+var labelKeySvc = []*ocmetricspb.LabelKey{
+	{Key: "direction"},
+	{Key: "port"},
+	{Key: "protocol"},
+	{Key: "service"},
+}
 
+func (ir *Receiver) recreateName(mf *prometheus.MetricFamily, mfe *mfEntry) {
+
+	service := ""
+
+	nameIn := mf.GetName()
+
+	//  12 metric=cluster.outbound|9091||istio-telemetry.istio-system.svc.cluster.local.internal.upstream_rq_2xx,
+	//  12 metric=cluster.outbound|9091||istio-telemetry.istio-system.svc.cluster.local.upstream_cx_rx_bytes_total,
+	// direction | port | protocol | serviceAndMetric
+	if strings.Contains(nameIn, "|") {
+		parts := strings.Split(nameIn, "|")
+		if len(parts) == 4 {
+			mfe.rename = true
+			serviceAndMetric := parts[3]
+			subparts := strings.Split(serviceAndMetric, ".")
+			l := len(subparts)
+			if l > 1 {
+				mfe.name = subparts[len(subparts)-1]
+				service = strings.Join(subparts[:(l - 1)], ".")
+			} else {
+				mfe.name = serviceAndMetric
+			}
+
+			mfe.labelKeys = labelKeySvc
+			mfe.labelValues = []*ocmetricspb.LabelValue{
+				{Value: parts[0], HasValue: true},
+				{Value: parts[1], HasValue: true},
+				{Value: parts[2], HasValue: true},
+				{Value: service, HasValue: true},
+			}
+		}
+	} else if strings.HasPrefix(nameIn, "http") {
+		//  1 metric=http.10.24.13.143_9555.downstream_cx_tx_bytes_total,
+		//	1 metric=http.10.24.13.143_9555.downstream_rq_2xx,
+		parts := strings.Split(nameIn, ".")
+		port := ""
+		l := len(parts)
+		if l == 6 {
+			mfe.rename = true
+			mfe.name = parts[l-1]
+			subpart := strings.Split(parts[4], "_")
+			l = len(subpart)
+			if l == 2 {
+				port = subpart[1]
+				service = strings.Join(parts[1:][:3], ".")
+				service = fmt.Sprintf("%s.%s", service, subpart[0])
+			}
+			mfe.labelKeys = labelKeySvc
+			mfe.labelValues = []*ocmetricspb.LabelValue{
+				{Value: "", HasValue: false},
+				{Value: port, HasValue: true},
+				{Value: "http", HasValue: true},
+				{Value: service, HasValue: true},
+			}
+		}
+	}
+}
+
+func (ir *Receiver) toDesc(metric *prometheus.MetricFamily, mfe *mfEntry) *ocmetricspb.MetricDescriptor {
+
+	name := metric.GetName()
+	labelKeys := ir.toLabelKeys(metric)
+
+	if mfe != nil && mfe.rename {
+		name = mfe.name
+		labelKeys = append(mfe.labelKeys, labelKeys...)
+	}
 	desc := &ocmetricspb.MetricDescriptor{
-		Name:        metric.GetName(),
+		Name:        name,
 		Description: "",
 		Type:        ir.toType(metric),
-		LabelKeys:   ir.toLabelKeys(metric),
+		LabelKeys:   labelKeys,
 	}
 	return desc
 }
@@ -304,8 +380,11 @@ func (ir *Receiver) toPoint(mt prometheus.MetricType, m *prometheus.Metric) ([]*
 	return append(pts, pt), nil
 }
 
-func (ir *Receiver) toOneTimeseries(mf *prometheus.MetricFamily, m *prometheus.Metric, startTime int64, nodeId string) (*ocmetricspb.TimeSeries, error) {
+func (ir *Receiver) toOneTimeseries(mf *prometheus.MetricFamily, m *prometheus.Metric, startTime int64, nodeId string, mfe *mfEntry) (*ocmetricspb.TimeSeries, error) {
 	lv := make([]*ocmetricspb.LabelValue, 0, 0)
+	if mfe != nil && mfe.rename {
+		lv = append(lv, mfe.labelValues...)
+	}
 	lv = append(lv, &ocmetricspb.LabelValue{Value: nodeId})
 	labels := m.Label
 	for _, label := range labels {
@@ -377,6 +456,7 @@ func (ir *Receiver) addOrGetMfe(db *metricsdb, mf *prometheus.MetricFamily) *mfE
 	if !ok {
 		//save first
 		mfe = &mfEntry{mf: mf, metricMap: map[string]*prometheus.Metric{}}
+		ir.recreateName(mf, mfe)
 		db.mfes[mf.Name] = mfe
 	}
 	return mfe
@@ -408,7 +488,7 @@ func (ir *Receiver) compareAndExport(db *metricsdb, mfs []*prometheus.MetricFami
 	for _, mf := range mfs {
 		mfe := ir.addOrGetMfe(db, mf)
 
-		descriptor := ir.toDesc(mf)
+		descriptor := ir.toDesc(mf, mfe)
 		if descriptor.Type == ocmetricspb.MetricDescriptor_UNSPECIFIED {
 			// TODO: [rghetia] Count errors
 			log.Printf("unspecified type %v\n", mf)
@@ -427,7 +507,7 @@ func (ir *Receiver) compareAndExport(db *metricsdb, mfs []*prometheus.MetricFami
 					log.Printf("computeDiff error: %s-%s %v\n", mf.Name, key, err)
 					continue
 				}
-				ts, err := ir.toOneTimeseries(mf, metric, first.TimestampMs, db.node.Id)
+				ts, err := ir.toOneTimeseries(mf, metric, first.TimestampMs, db.node.Id, mfe)
 				if err != nil {
 					// TODO [rghetia] count errors
 					log.Printf("toOneTimeseries error: %s-%s %v\n", mf.Name, key, err)
@@ -443,7 +523,7 @@ func (ir *Receiver) compareAndExport(db *metricsdb, mfs []*prometheus.MetricFami
 			ocmetric := &ocmetricspb.Metric{
 				MetricDescriptor: descriptor,
 				Timeseries:       tss,
-				Resource: ir.toResource(db),
+				Resource:         ir.toResource(db),
 			}
 			ocmetrics = append(ocmetrics, ocmetric)
 			//if mf.Type == prometheus.MetricType_COUNTER {

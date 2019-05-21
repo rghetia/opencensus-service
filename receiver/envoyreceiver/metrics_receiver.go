@@ -435,6 +435,7 @@ func (ir *Receiver) compareAndExport(db *metricsdb, mfs []*prometheus.MetricFami
 				}
 				tss = append(tss, ts)
 			} else {
+				log.Printf("First occurrence: metric=%s, key=%s, value=%v\n", mfe.mf.GetName(), key, metric)
 				mfe.metricMap[key] = metric
 			}
 		}

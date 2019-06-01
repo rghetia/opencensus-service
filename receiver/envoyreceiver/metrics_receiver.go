@@ -40,6 +40,7 @@ import (
 	"google.golang.org/api/support/bundler"
 	"google.golang.org/grpc"
 	prometheus "istio.io/gogo-genproto/prometheus"
+	"go.opencensus.io/resource/resourcekeys"
 )
 
 // Receiver is the type that exposes Trace and Metrics reception.
@@ -133,7 +134,7 @@ func (ir *Receiver) StreamMetrics(stream metricspb.MetricsService_StreamMetricsS
 					node: id.Node,
 					mfes: map[string]*mfEntry{},
 				}
-				log.Printf("initialize node-id %s", db.node.Id)
+				log.Printf("initialize node-id %s, node: %v\n", db.node.Id, id.Node)
 			}
 		}
 		if db != nil {
@@ -205,8 +206,7 @@ func (ir *Receiver) toType(metric *prometheus.MetricFamily) ocmetricspb.MetricDe
 	case prometheus.MetricType_HISTOGRAM:
 		return ocmetricspb.MetricDescriptor_CUMULATIVE_DISTRIBUTION
 	case prometheus.MetricType_SUMMARY:
-		//return ocmetricspb.MetricDescriptor_SUMMARY
-		return ocmetricspb.MetricDescriptor_UNSPECIFIED
+		return ocmetricspb.MetricDescriptor_SUMMARY
 	default:
 		return ocmetricspb.MetricDescriptor_UNSPECIFIED
 	}
@@ -321,7 +321,7 @@ func (ir *Receiver) sumToSum(m *prometheus.Metric) *ocmetricspb.Point_SummaryVal
 		sum = 0
 	}
 	quantiles := m.Summary.GetQuantile()
-	valueAtPercentiles := make([]*ocmetricspb.SummaryValue_Snapshot_ValueAtPercentile, len(quantiles)+1)
+	valueAtPercentiles := make([]*ocmetricspb.SummaryValue_Snapshot_ValueAtPercentile, len(quantiles))
 	idx := 0
 	for _, b := range quantiles {
 		valueAtPercentiles[idx] = &ocmetricspb.SummaryValue_Snapshot_ValueAtPercentile{
@@ -502,25 +502,40 @@ func (ir *Receiver) addOrGetMfe(db *metricsdb, mf *prometheus.MetricFamily) *mfE
 }
 
 func (ir *Receiver) toResource(db *metricsdb) *resourcepb.Resource {
-	return nil
-	//r := &resourcepb.Resource{}
-	//r.Labels = map[string]string{}
-	//metadata := db.node.Metadata
-	//if metadata != nil {
-	//	for k, v := range metadata.Fields {
-	//		switch k {
-	//		case "CONFIG_NAMESPACE":
-	//			r.Labels["k8s.namespace.name"] = v.GetStringValue()
-	//		case "POD_NAME":
-	//			r.Labels["k8s.pod.name"] = v.GetStringValue()
-	//		case "app":
-	//		}
-	//	}
-	//
-	//}
-	//r.Labels["k8s.cluster.name"] = db.node.GetCluster()
-	//return r
+	// TODO: [rghetia] do proper resource transformation. There may be some metrics
+	// for which resource could be pod, for some it could be node, etc..
+	r := &resourcepb.Resource{
+		Type: resourcekeys.ContainerType,
+	}
+	r.Labels = map[string]string{}
+
+	// TODO: [rghetia] container name is mandatory.
+	r.Labels[resourcekeys.ContainerKeyName] = ""
+	
+	// TODO: [rghetia] clustername is <app>.<namespace>. It should be kubernetes cluster name.
+	r.Labels[resourcekeys.K8SKeyClusterName] = db.node.GetCluster()
+	metadata := db.node.Metadata
+	if metadata != nil {
+		for k, v := range metadata.Fields {
+			switch k {
+			case "CONFIG_NAMESPACE":
+				r.Labels[resourcekeys.K8SKeyNamespaceName] = v.GetStringValue()
+			case "POD_NAME":
+				r.Labels[resourcekeys.K8SKeyPodName] = v.GetStringValue()
+			case "app":
+				r.Labels[resourcekeys.ContainerKeyName] = v.GetStringValue()
+			}
+		}
+
+	}
+	locality := db.node.Locality
+	if locality != nil {
+		r.Labels[resourcekeys.CloudKeyZone] = locality.Zone
+		r.Labels[resourcekeys.CloudKeyRegion] = locality.Region
+	}
+	return r
 }
+
 func (ir *Receiver) compareAndExport(db *metricsdb, mfs []*prometheus.MetricFamily) error {
 	md := data.MetricsData{Node: ir.idToNode(db.node)}
 	ocmetrics := make([]*ocmetricspb.Metric, 0)

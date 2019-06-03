@@ -20,6 +20,7 @@ import (
 	ocmetricspb "github.com/census-instrumentation/opencensus-proto/gen-go/metrics/v1"
 	"github.com/google/go-cmp/cmp"
 	prometheus "istio.io/gogo-genproto/prometheus"
+	"github.com/golang/protobuf/ptypes/wrappers"
 )
 
 func TestMetricToOcMetric(t *testing.T) {
@@ -206,6 +207,97 @@ func TestMetricToOcMetric(t *testing.T) {
 											},
 											{
 												Count: 1,
+											},
+										},
+									},
+								},
+								Timestamp: msecToProtoTimestamp(0),
+							},
+						},
+						StartTimestamp: msecToProtoTimestamp(0),
+						LabelValues: []*ocmetricspb.LabelValue{
+							{
+								Value: "n3",
+							},
+							{
+								Value: "v1",
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "summary to summary",
+			nodeId: "n3",
+			in: prometheus.MetricFamily{
+				Name: "summary1",
+				Type: prometheus.MetricType_SUMMARY,
+				Metric: []*prometheus.Metric{
+					{
+						Label: []*prometheus.LabelPair{
+							{
+								Name:  "k1",
+								Value: "v1",
+							},
+						},
+						Summary: &prometheus.Summary{
+							SampleCount: 3,
+							SampleSum:   6,
+							Quantile: []*prometheus.Quantile{
+								{
+									Value: 1,
+									Quantile:      0.5,
+								},
+								{
+									Value: 2,
+									Quantile:      0.9,
+								},
+								{
+									Value: 3,
+									Quantile:      1.0,
+								},
+							},
+						},
+						TimestampMs: 0,
+					},
+				},
+			},
+			want: ocmetricspb.Metric{
+				MetricDescriptor: &ocmetricspb.MetricDescriptor{
+					Name: "summary1",
+					Type: ocmetricspb.MetricDescriptor_SUMMARY,
+					LabelKeys: []*ocmetricspb.LabelKey{
+						{Key: "node_id"},
+						{Key: "k1"},
+					},
+				},
+				Timeseries: []*ocmetricspb.TimeSeries{
+					{
+						Points: []*ocmetricspb.Point{
+							{
+								Value: &ocmetricspb.Point_SummaryValue{
+									SummaryValue: &ocmetricspb.SummaryValue{
+										Count: &wrappers.Int64Value{
+											Value: 3,
+										},
+										Sum:   &wrappers.DoubleValue{
+											Value: 6.0,
+										},
+										Snapshot: &ocmetricspb.SummaryValue_Snapshot{
+											PercentileValues: []*ocmetricspb.SummaryValue_Snapshot_ValueAtPercentile{
+												{
+													Percentile: 0.5,
+													Value:      1,
+												},
+												{
+													Percentile: 0.9,
+													Value:      2,
+												},
+												{
+													Percentile: 1.0,
+													Value:      3,
+												},
 											},
 										},
 									},

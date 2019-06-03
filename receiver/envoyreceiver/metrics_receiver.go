@@ -60,6 +60,7 @@ type Receiver struct {
 
 type metricsdb struct {
 	node *core.Node
+	res *resourcepb.Resource
 	mfes map[string]*mfEntry
 }
 
@@ -132,6 +133,7 @@ func (ir *Receiver) StreamMetrics(stream metricspb.MetricsService_StreamMetricsS
 			if id != nil && id.Node != nil {
 				db = &metricsdb{
 					node: id.Node,
+					res: ir.toResource(id.Node),
 					mfes: map[string]*mfEntry{},
 				}
 				log.Printf("initialize node-id %s, node: %v\n", db.node.Id, id.Node)
@@ -501,7 +503,7 @@ func (ir *Receiver) addOrGetMfe(db *metricsdb, mf *prometheus.MetricFamily) *mfE
 	return mfe
 }
 
-func (ir *Receiver) toResource(db *metricsdb) *resourcepb.Resource {
+func (ir *Receiver) toResource(node *core.Node) *resourcepb.Resource {
 	// TODO: [rghetia] do proper resource transformation. There may be some metrics
 	// for which resource could be pod, for some it could be node, etc..
 	r := &resourcepb.Resource{
@@ -511,10 +513,10 @@ func (ir *Receiver) toResource(db *metricsdb) *resourcepb.Resource {
 
 	// TODO: [rghetia] container name is mandatory.
 	r.Labels[resourcekeys.ContainerKeyName] = ""
-	
+
 	// TODO: [rghetia] clustername is <app>.<namespace>. It should be kubernetes cluster name.
-	r.Labels[resourcekeys.K8SKeyClusterName] = db.node.GetCluster()
-	metadata := db.node.Metadata
+	r.Labels[resourcekeys.K8SKeyClusterName] = node.GetCluster()
+	metadata := node.Metadata
 	if metadata != nil {
 		for k, v := range metadata.Fields {
 			switch k {
@@ -528,7 +530,7 @@ func (ir *Receiver) toResource(db *metricsdb) *resourcepb.Resource {
 		}
 
 	}
-	locality := db.node.Locality
+	locality := node.Locality
 	if locality != nil {
 		r.Labels[resourcekeys.CloudKeyZone] = locality.Zone
 		r.Labels[resourcekeys.CloudKeyRegion] = locality.Region
@@ -556,6 +558,7 @@ func (ir *Receiver) compareAndExport(db *metricsdb, mfs []*prometheus.MetricFami
 			first, ok := mfe.metricMap[key]
 			if ok {
 				// compute diff
+				fmt.Printf("Summary, node:%v, First:%v, Current:%v\n", db.node.Id, first, metric)
 				err := ir.computeDiff(first, metric, mf.Type)
 				if err != nil {
 					// TODO [rghetia] count errors
@@ -578,12 +581,9 @@ func (ir *Receiver) compareAndExport(db *metricsdb, mfs []*prometheus.MetricFami
 			ocmetric := &ocmetricspb.Metric{
 				MetricDescriptor: descriptor,
 				Timeseries:       tss,
-				Resource:         ir.toResource(db),
+				Resource:         db.res,
 			}
 			ocmetrics = append(ocmetrics, ocmetric)
-			//if mf.Type == prometheus.MetricType_COUNTER {
-			//	log.Printf("Counter: envoy: %v\n, oc: %v\n", mf, ocmetric)
-			//}
 			tsCount += len(tss)
 		}
 	}

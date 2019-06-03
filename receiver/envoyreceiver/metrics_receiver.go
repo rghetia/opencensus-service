@@ -245,6 +245,19 @@ func (ir *Receiver) recreateName(mf *prometheus.MetricFamily, mfe *mfEntry) {
 	//  12 metric=cluster.outbound|9091||istio-telemetry.istio-system.svc.cluster.local.internal.upstream_rq_2xx,
 	//  12 metric=cluster.outbound|9091||istio-telemetry.istio-system.svc.cluster.local.upstream_cx_rx_bytes_total,
 	// direction | port | protocol | serviceAndMetric
+	//  5 metadata.google.internal.external.upstream_rq_time,
+	//	5 metadata.google.internal.upstream_rq_time,
+	//	1 metric=cluster.PassthroughCluster.external.upstream_rq_time,
+	//	1 metric=cluster.PassthroughCluster.upstream_rq_time,
+	//	12 metric=cluster.prometheus_stats.external.upstream_rq_time,
+	//	12 metric=cluster.prometheus_stats.upstream_rq_time,
+	//	2 paymentservice.default.svc.cluster.local.external.upstream_rq_time,
+	//  2 paymentservice.default.svc.cluster.local.upstream_rq_time,
+	//  1 paymentservice.default.svc.cluster.local.zone.us-central1-a.us-central1-b.upstream_rq_time,
+	if strings.Contains(nameIn, "cluster.PassthroughCluster") ||
+		strings.Contains(nameIn, "cluster.prometheus_stats") {
+			return
+	}
 	if strings.Contains(nameIn, "|") {
 		parts := strings.Split(nameIn, "|")
 		if len(parts) == 4 {
@@ -253,8 +266,13 @@ func (ir *Receiver) recreateName(mf *prometheus.MetricFamily, mfe *mfEntry) {
 			subparts := strings.Split(serviceAndMetric, ".")
 			l := len(subparts)
 			if l > 1 {
-				mfe.name = subparts[len(subparts)-1]
-				service = strings.Join(subparts[:(l - 1)], ".")
+				if l > 2 && (subparts[l-2] == "external" || subparts[l-2] == "internal") {
+					mfe.name = strings.Join(subparts[len(subparts)-2:], ".")
+					service = strings.Join(subparts[:(l - 2)], ".")
+				} else {
+					mfe.name = subparts[len(subparts)-1]
+					service = strings.Join(subparts[:(l - 1)], ".")
+				}
 			} else {
 				mfe.name = serviceAndMetric
 			}
@@ -558,7 +576,9 @@ func (ir *Receiver) compareAndExport(db *metricsdb, mfs []*prometheus.MetricFami
 			first, ok := mfe.metricMap[key]
 			if ok {
 				// compute diff
-				fmt.Printf("Summary, node:%v, First:%v, Current:%v\n", db.node.Id, first, metric)
+				if mf.Type == prometheus.MetricType_SUMMARY {
+					log.Printf("Summary, node:%v, name:%v, First:%v, Current:%v\n", db.node.Id, mf.Name, first, metric)
+				}
 				err := ir.computeDiff(first, metric, mf.Type)
 				if err != nil {
 					// TODO [rghetia] count errors
@@ -570,6 +590,9 @@ func (ir *Receiver) compareAndExport(db *metricsdb, mfs []*prometheus.MetricFami
 					// TODO [rghetia] count errors
 					log.Printf("toOneTimeseries error: %s-%s %v\n", mf.Name, key, err)
 					continue
+				}
+				if mf.Type == prometheus.MetricType_SUMMARY {
+					log.Printf("Summary, node:%v, name:%v, Converted:%v\n", db.node.Id, mf.Name, ts)
 				}
 				tss = append(tss, ts)
 			} else {

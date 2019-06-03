@@ -70,3 +70,5 @@ require (
 	k8s.io/kube-openapi v0.0.0-20190205224424-fd29a9f2f429 // indirect
 	sigs.k8s.io/structured-merge-diff v0.0.0-20190130003954-e5e029740eb8 // indirect
 )
+
+replace contrib.go.opencensus.io/exporter/stackdriver v0.12.1 => ../../../contrib.go.opencensus.io/exporter/stackdriver

@@ -121,6 +121,14 @@ func (ir *Receiver) StartMetricsReception(ctx context.Context, asyncErrorChan ch
 	return ir.startServer()
 }
 
+func newDb(node *core.Node, res *resourcepb.Resource) *metricsdb {
+	return &metricsdb{
+		node: node,
+		res:  res,
+		mfes: map[string]*mfEntry{},
+	}
+}
+
 func (ir *Receiver) StreamMetrics(stream metricspb.MetricsService_StreamMetricsServer) error {
 	var db *metricsdb
 	for {
@@ -132,11 +140,7 @@ func (ir *Receiver) StreamMetrics(stream metricspb.MetricsService_StreamMetricsS
 		if db == nil {
 			id := msg.GetIdentifier()
 			if id != nil && id.Node != nil {
-				db = &metricsdb{
-					node: id.Node,
-					res:  ir.toResource(id.Node),
-					mfes: map[string]*mfEntry{},
-				}
+				db = newDb(id.Node, ir.toResource(id.Node))
 				log.Printf("initialize node-id %s, node: %v\n", db.node.Id, id.Node)
 			}
 		}

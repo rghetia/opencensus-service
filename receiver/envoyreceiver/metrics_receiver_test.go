@@ -25,16 +25,17 @@ import (
 
 func TestMetricToOcMetric(t *testing.T) {
 	ir, _ := New("127.0.0.0:55690", nil)
+	db := newDb(nil, nil)
 	tcs := []struct {
 		name   string
 		nodeId string
-		in     prometheus.MetricFamily
+		in     *prometheus.MetricFamily
 		want   ocmetricspb.Metric
 	}{
 		{
 			name:   "counter to cumulative",
 			nodeId: "n1",
-			in: prometheus.MetricFamily{
+			in: &prometheus.MetricFamily{
 				Name: "counter1",
 				Type: prometheus.MetricType_COUNTER,
 				Metric: []*prometheus.Metric{
@@ -87,9 +88,9 @@ func TestMetricToOcMetric(t *testing.T) {
 			},
 		},
 		{
-			name:   "counter to cumulative",
+			name:   "gauge to guage",
 			nodeId: "n2",
-			in: prometheus.MetricFamily{
+			in: &prometheus.MetricFamily{
 				Name: "gauge1",
 				Type: prometheus.MetricType_GAUGE,
 				Metric: []*prometheus.Metric{
@@ -141,9 +142,9 @@ func TestMetricToOcMetric(t *testing.T) {
 			},
 		},
 		{
-			name:   "counter to cumulative",
+			name:   "histogram to distribution",
 			nodeId: "n3",
-			in: prometheus.MetricFamily{
+			in: &prometheus.MetricFamily{
 				Name: "histogram1",
 				Type: prometheus.MetricType_HISTOGRAM,
 				Metric: []*prometheus.Metric{
@@ -230,7 +231,7 @@ func TestMetricToOcMetric(t *testing.T) {
 		{
 			name:   "summary to summary",
 			nodeId: "n3",
-			in: prometheus.MetricFamily{
+			in: &prometheus.MetricFamily{
 				Name: "summary1",
 				Type: prometheus.MetricType_SUMMARY,
 				Metric: []*prometheus.Metric{
@@ -318,14 +319,116 @@ func TestMetricToOcMetric(t *testing.T) {
 				},
 			},
 		},
+		{
+			name:   "summary to summary",
+			nodeId: "n3",
+			in: &prometheus.MetricFamily{
+				Name: "cluster.inbound|9555|grpc|adservice.default.svc.cluster.local.upstream_rq_time",
+				Type: prometheus.MetricType_SUMMARY,
+				Metric: []*prometheus.Metric{
+					{
+						Label: []*prometheus.LabelPair{
+							{
+								Name:  "k1",
+								Value: "v1",
+							},
+						},
+						Summary: &prometheus.Summary{
+							SampleCount: 3,
+							SampleSum:   6,
+							Quantile: []*prometheus.Quantile{
+								{
+									Value:    1,
+									Quantile: 0.5,
+								},
+								{
+									Value:    2,
+									Quantile: 0.9,
+								},
+								{
+									Value:    3,
+									Quantile: 1.0,
+								},
+							},
+						},
+						TimestampMs: 0,
+					},
+				},
+			},
+			want: ocmetricspb.Metric{
+				MetricDescriptor: &ocmetricspb.MetricDescriptor{
+					Name: "upstream_rq_time",
+					Type: ocmetricspb.MetricDescriptor_SUMMARY,
+					LabelKeys: []*ocmetricspb.LabelKey{
+						{Key: "direction"},
+						{Key: "port"},
+						{Key: "protocol"},
+						{Key: "service"},
+						{Key: "origin"},
+						{Key: "node_id"},
+						{Key: "k1"},
+					},
+				},
+				Timeseries: []*ocmetricspb.TimeSeries{
+					{
+						Points: []*ocmetricspb.Point{
+							{
+								Value: &ocmetricspb.Point_SummaryValue{
+									SummaryValue: &ocmetricspb.SummaryValue{
+										Count: &wrappers.Int64Value{
+											Value: 3,
+										},
+										Sum: &wrappers.DoubleValue{
+											Value: 6.0,
+										},
+										Snapshot: &ocmetricspb.SummaryValue_Snapshot{
+											PercentileValues: []*ocmetricspb.SummaryValue_Snapshot_ValueAtPercentile{
+												{
+													Percentile: 0.5,
+													Value:      1,
+												},
+												{
+													Percentile: 0.9,
+													Value:      2,
+												},
+												{
+													Percentile: 1.0,
+													Value:      3,
+												},
+											},
+										},
+									},
+								},
+								Timestamp: msecToProtoTimestamp(0),
+							},
+						},
+						StartTimestamp: msecToProtoTimestamp(0),
+						LabelValues: []*ocmetricspb.LabelValue{
+							{Value: "inbound", HasValue: true},
+							{Value: "9555", HasValue: true},
+							{Value: "grpc", HasValue: true},
+							{Value: "adservice.default", HasValue: true},
+							{Value: "", HasValue: false},
+							{
+								Value: "n3",
+							},
+							{
+								Value: "v1",
+							},
+						},
+					},
+				},
+			},
+		},
 	}
 	for _, tc := range tcs {
-		gotDesc := ir.toDesc(&tc.in, nil)
+		mfe := ir.addOrGetMfe(db, tc.in)
+		gotDesc := ir.toDesc(tc.in, mfe)
 		if !cmp.Equal(gotDesc, tc.want.MetricDescriptor) {
 			t.Fatalf("test descriptor %s:\n got=%v\n want=%v\n", tc.name, *gotDesc, tc.want.MetricDescriptor)
 		}
 		for i, metric := range tc.in.Metric {
-			gotTs, err := ir.toOneTimeseries(&tc.in, metric, 0, tc.nodeId, nil)
+			gotTs, err := ir.toOneTimeseries(tc.in, metric, 0, tc.nodeId, mfe)
 			if err != nil {
 				t.Fatalf("test %s failed with error %v", tc.name, err)
 			}

@@ -434,6 +434,32 @@ func TestExtractName(t *testing.T) {
 				},
 			},
 		},
+		{nameIn: "cluster.xds-grpc.upstream_rq_2xx",
+			wantMfe: &mfEntry{
+				renamed: true,
+				name:    "upstream_rq_2xx",
+				labelValues: []*ocmetricspb.LabelValue{
+					{Value: "", HasValue: false},
+					{Value: "", HasValue: false},
+					{Value: "", HasValue: false},
+					{Value: "xds-grpc", HasValue: true},
+					{Value: "", HasValue: false},
+				},
+			},
+		},
+		{nameIn: "http.10.24.10.187_7070.downstream_cx_active",
+			wantMfe: &mfEntry{
+				renamed: true,
+				name:    "downstream_cx_active",
+				labelValues: []*ocmetricspb.LabelValue{
+					{Value: "", HasValue: false},
+					{Value: "7070", HasValue: true},
+					{Value: "http", HasValue: true},
+					{Value: "10.24.10.187", HasValue: true},
+					{Value: "", HasValue: false},
+				},
+			},
+		},
 		{nameIn: "junk.service.name",
 			wantMfe: &mfEntry{
 				renamed: false,

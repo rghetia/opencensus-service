@@ -246,15 +246,17 @@ func (ir *Receiver) recreateName(nameIn string, mfe *mfEntry) {
 	var direction, port, proto, origin string
 	addLabels := false;
 
-	rName, _ := regexp.Compile(`^(cluster|http)\.(.*)\.([a-zA-Z_]*)$`)
+	rName, _ := regexp.Compile(`^(cluster|http)\.(.*)\.([0-9a-zA-Z_]*)$`)
 	rOrigin, _ := regexp.Compile(`^(.*)\.(external|internal|zone.*)$`)
 	rSubName, _ := regexp.Compile(`^(outbound|inbound)\|([0-9]*)\|([a-z]*)\|(.*)\.svc\.cluster\.local$`)
+	rHttpIpPort, _ := regexp.Compile(`^([0-9\.]+)_([0-9]+)$`)
 
 	match := rName.FindStringSubmatch(nameIn)
 	if len(match) != 4 {
 		return
 	}
 
+	mfe.renamed = true
 	mfe.name = match[3]
 	svcName := match[2]
 
@@ -274,10 +276,14 @@ func (ir *Receiver) recreateName(nameIn string, mfe *mfEntry) {
 		}
 
 		addLabels = true
-		mfe.renamed = true
-	} else if match[0] == "http" {
+	} else if match[1] == "http" {
 		proto = "http"
 		addLabels = true
+		match = rHttpIpPort.FindStringSubmatch(svcName)
+		if len(match) == 3 {
+			svcName = match[1]
+			port = match[2]
+		}
 	}
 
 	if addLabels {

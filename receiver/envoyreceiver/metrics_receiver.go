@@ -19,7 +19,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"sort"
 	"strings"
@@ -42,6 +41,7 @@ import (
 	"google.golang.org/grpc"
 	prometheus "istio.io/gogo-genproto/prometheus"
 	"regexp"
+	"sync/atomic"
 )
 
 // Receiver is the type that exposes Trace and Metrics reception.
@@ -80,6 +80,20 @@ var (
 	errHistBucketLenNotEqual   = errors.New("histogram bucket length not equal")
 	errHistBucketBoundNotEqual = errors.New("histogram bucket bound not equal")
 )
+
+var (
+	unspecifiedMetricErrorCount int64
+	diffMetricErrorCount        int64
+	convertTimeseriesErrorCount int64
+)
+
+var labelKeySvc = []*ocmetricspb.LabelKey{
+	{Key: "direction"},
+	{Key: "port"},
+	{Key: "protocol"},
+	{Key: "service"},
+	{Key: "origin"},
+}
 
 const (
 	source      = "EnvoyReceiver"
@@ -141,7 +155,6 @@ func (ir *Receiver) StreamMetrics(stream metricspb.MetricsService_StreamMetricsS
 			id := msg.GetIdentifier()
 			if id != nil && id.Node != nil {
 				db = newDb(id.Node, ir.toResource(id.Node))
-				log.Printf("initialize node-id %s, node: %v\n", db.node.Id, id.Node)
 			}
 		}
 		if db != nil {
@@ -232,14 +245,6 @@ func (ir *Receiver) toLabelKeys(metric *prometheus.MetricFamily) []*ocmetricspb.
 		return keys
 	}
 	return keys
-}
-
-var labelKeySvc = []*ocmetricspb.LabelKey{
-	{Key: "direction"},
-	{Key: "port"},
-	{Key: "protocol"},
-	{Key: "service"},
-	{Key: "origin"},
 }
 
 func createLabelValue(value string) *ocmetricspb.LabelValue {
@@ -560,8 +565,8 @@ func (ir *Receiver) compareAndExport(db *metricsdb, mfs []*prometheus.MetricFami
 
 		descriptor := ir.toDesc(mf, mfe)
 		if descriptor.Type == ocmetricspb.MetricDescriptor_UNSPECIFIED {
-			// TODO: [rghetia] Count errors
-			log.Printf("unspecified type %v\n", mf)
+			// TODO [rghetia] export the counters
+			atomic.AddInt64(&unspecifiedMetricErrorCount, 1)
 			continue
 		}
 		tss := make([]*ocmetricspb.TimeSeries, 0, 0)
@@ -571,27 +576,20 @@ func (ir *Receiver) compareAndExport(db *metricsdb, mfs []*prometheus.MetricFami
 			first, ok := mfe.metricMap[key]
 			if ok {
 				// compute diff
-				if mf.Type == prometheus.MetricType_SUMMARY {
-					log.Printf("Summary, node:%v, name:%v, First:%v, Current:%v, Descriptor=%v\n", db.node.Id, mf.Name, first, metric, descriptor)
-				}
 				err := ir.computeDiff(first, metric, mf.Type)
 				if err != nil {
-					// TODO [rghetia] count errors
-					log.Printf("computeDiff error: %s-%s %v\n", mf.Name, key, err)
+					// TODO [rghetia] export the counters
+					atomic.AddInt64(&diffMetricErrorCount, 1)
 					continue
 				}
 				ts, err := ir.toOneTimeseries(mf, metric, first.TimestampMs, db.node.Id, mfe)
 				if err != nil {
-					// TODO [rghetia] count errors
-					log.Printf("toOneTimeseries error: %s-%s %v\n", mf.Name, key, err)
+					// TODO [rghetia] export the counters
+					atomic.AddInt64(&convertTimeseriesErrorCount, 1)
 					continue
-				}
-				if mf.Type == prometheus.MetricType_SUMMARY {
-					log.Printf("Summary, node:%v, name:%v, Converted:%v\n", db.node.Id, mf.Name, ts)
 				}
 				tss = append(tss, ts)
 			} else {
-				log.Printf("First occurrence: metric=%s, key=%s, value=%v\n", mfe.mf.GetName(), key, metric)
 				mfe.metricMap[key] = metric
 			}
 		}
@@ -608,11 +606,6 @@ func (ir *Receiver) compareAndExport(db *metricsdb, mfs []*prometheus.MetricFami
 	if len(ocmetrics) > 0 {
 		md.Metrics = ocmetrics
 		ir.metricsConsumer.ConsumeMetricsData(context.Background(), md)
-		log.Printf("Exporting for node:%s, timeseries:%d, metrics:%d\n",
-			db.node.Id, tsCount, len(ocmetrics))
-	} else {
-		log.Printf("Not exporting for node:%s, timeseries:%d, metrics:%d\n",
-			db.node.Id, tsCount, len(ocmetrics))
 	}
 	return nil
 }

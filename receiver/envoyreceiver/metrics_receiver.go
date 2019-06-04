@@ -248,7 +248,8 @@ func (ir *Receiver) recreateName(nameIn string, mfe *mfEntry) {
 
 	rName, _ := regexp.Compile(`^(cluster|http)\.(.*)\.([0-9a-zA-Z_]*)$`)
 	rOrigin, _ := regexp.Compile(`^(.*)\.(external|internal|zone.*)$`)
-	rSubName, _ := regexp.Compile(`^(outbound|inbound)\|([0-9]*)\|([a-z]*)\|(.*)\.svc\.cluster\.local$`)
+	rDirection, _ := regexp.Compile(`^(outbound|inbound)\|([0-9]*)\|([a-z]*)\|(.*)$`)
+	rSubName, _ := regexp.Compile(`^(.*)\.svc\.cluster\.local$`)
 	rHttpIpPort, _ := regexp.Compile(`^([0-9\.]+)_([0-9]+)$`)
 
 	match := rName.FindStringSubmatch(nameIn)
@@ -267,12 +268,17 @@ func (ir *Receiver) recreateName(nameIn string, mfe *mfEntry) {
 			svcName = match[1]
 		}
 
-		match = rSubName.FindStringSubmatch(svcName)
+		match = rDirection.FindStringSubmatch(svcName)
 		if len(match) == 5 {
 			direction = match[1]
 			port = match[2]
 			proto = match[3]
 			svcName = match[4]
+		}
+
+		match = rSubName.FindStringSubmatch(svcName)
+		if len(match) == 2 {
+			svcName = match[1]
 		}
 
 		addLabels = true
@@ -287,6 +293,7 @@ func (ir *Receiver) recreateName(nameIn string, mfe *mfEntry) {
 	}
 
 	if addLabels {
+		mfe.labelKeys = labelKeySvc
 		mfe.labelValues = []*ocmetricspb.LabelValue{
 			createLabelValue(direction),
 			createLabelValue(port),
@@ -561,7 +568,7 @@ func (ir *Receiver) compareAndExport(db *metricsdb, mfs []*prometheus.MetricFami
 			if ok {
 				// compute diff
 				if mf.Type == prometheus.MetricType_SUMMARY {
-					log.Printf("Summary, node:%v, name:%v, First:%v, Current:%v\n", db.node.Id, mf.Name, first, metric)
+					log.Printf("Summary, node:%v, name:%v, First:%v, Current:%v, Descriptor=%v\n", db.node.Id, mf.Name, first, metric, descriptor)
 				}
 				err := ir.computeDiff(first, metric, mf.Type)
 				if err != nil {

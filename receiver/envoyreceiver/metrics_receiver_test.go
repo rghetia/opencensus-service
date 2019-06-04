@@ -347,6 +347,7 @@ func TestExtractName(t *testing.T) {
 			wantMfe: &mfEntry{
 				renamed: true,
 				name:    "upstream_rq_time",
+				labelKeys: labelKeySvc,
 				labelValues: []*ocmetricspb.LabelValue{
 					{Value: "inbound", HasValue: true},
 					{Value: "9555", HasValue: true},
@@ -360,6 +361,7 @@ func TestExtractName(t *testing.T) {
 			wantMfe: &mfEntry{
 				renamed: true,
 				name:    "upstream_rq_time",
+				labelKeys: labelKeySvc,
 				labelValues: []*ocmetricspb.LabelValue{
 					{Value: "inbound", HasValue: true},
 					{Value: "9555", HasValue: true},
@@ -373,6 +375,7 @@ func TestExtractName(t *testing.T) {
 			wantMfe: &mfEntry{
 				renamed: true,
 				name:    "upstream_rq_time",
+				labelKeys: labelKeySvc,
 				labelValues: []*ocmetricspb.LabelValue{
 					{Value: "outbound", HasValue: true},
 					{Value: "9555", HasValue: true},
@@ -386,6 +389,7 @@ func TestExtractName(t *testing.T) {
 			wantMfe: &mfEntry{
 				renamed: true,
 				name:    "upstream_rq_time",
+				labelKeys: labelKeySvc,
 				labelValues: []*ocmetricspb.LabelValue{
 					{Value: "outbound", HasValue: true},
 					{Value: "9555", HasValue: true},
@@ -399,6 +403,7 @@ func TestExtractName(t *testing.T) {
 			wantMfe: &mfEntry{
 				renamed: true,
 				name:    "upstream_rq_time",
+				labelKeys: labelKeySvc,
 				labelValues: []*ocmetricspb.LabelValue{
 					{Value: "outbound", HasValue: true},
 					{Value: "9091", HasValue: true},
@@ -412,6 +417,7 @@ func TestExtractName(t *testing.T) {
 			wantMfe: &mfEntry{
 				renamed: true,
 				name:    "upstream_rq_time",
+				labelKeys: labelKeySvc,
 				labelValues: []*ocmetricspb.LabelValue{
 					{Value: "", HasValue: false},
 					{Value: "", HasValue: false},
@@ -425,6 +431,7 @@ func TestExtractName(t *testing.T) {
 			wantMfe: &mfEntry{
 				renamed: true,
 				name:    "upstream_rq_time",
+				labelKeys: labelKeySvc,
 				labelValues: []*ocmetricspb.LabelValue{
 					{Value: "", HasValue: false},
 					{Value: "", HasValue: false},
@@ -438,6 +445,7 @@ func TestExtractName(t *testing.T) {
 			wantMfe: &mfEntry{
 				renamed: true,
 				name:    "upstream_rq_2xx",
+				labelKeys: labelKeySvc,
 				labelValues: []*ocmetricspb.LabelValue{
 					{Value: "", HasValue: false},
 					{Value: "", HasValue: false},
@@ -451,12 +459,27 @@ func TestExtractName(t *testing.T) {
 			wantMfe: &mfEntry{
 				renamed: true,
 				name:    "downstream_cx_active",
+				labelKeys: labelKeySvc,
 				labelValues: []*ocmetricspb.LabelValue{
 					{Value: "", HasValue: false},
 					{Value: "7070", HasValue: true},
 					{Value: "http", HasValue: true},
 					{Value: "10.24.10.187", HasValue: true},
 					{Value: "", HasValue: false},
+				},
+			},
+		},
+		{nameIn: "cluster.outbound|80||metadata.google.internal.external.upstream_rq_time",
+			wantMfe: &mfEntry{
+				renamed: true,
+				name:    "upstream_rq_time",
+				labelKeys: labelKeySvc,
+				labelValues: []*ocmetricspb.LabelValue{
+					{Value: "outbound", HasValue: true},
+					{Value: "80", HasValue: true},
+					{Value: "", HasValue: false},
+					{Value: "metadata.google.internal", HasValue: true},
+					{Value: "external", HasValue: true},
 				},
 			},
 		},

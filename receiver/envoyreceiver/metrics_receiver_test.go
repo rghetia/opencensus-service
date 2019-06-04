@@ -26,13 +26,13 @@ import (
 func TestMetricToOcMetric(t *testing.T) {
 	ir, _ := New("127.0.0.0:55690", nil)
 	tcs := []struct {
-		name string
+		name   string
 		nodeId string
-		in   prometheus.MetricFamily
-		want ocmetricspb.Metric
+		in     prometheus.MetricFamily
+		want   ocmetricspb.Metric
 	}{
 		{
-			name: "counter to cumulative",
+			name:   "counter to cumulative",
 			nodeId: "n1",
 			in: prometheus.MetricFamily{
 				Name: "counter1",
@@ -87,7 +87,7 @@ func TestMetricToOcMetric(t *testing.T) {
 			},
 		},
 		{
-			name: "counter to cumulative",
+			name:   "counter to cumulative",
 			nodeId: "n2",
 			in: prometheus.MetricFamily{
 				Name: "gauge1",
@@ -141,7 +141,7 @@ func TestMetricToOcMetric(t *testing.T) {
 			},
 		},
 		{
-			name: "counter to cumulative",
+			name:   "counter to cumulative",
 			nodeId: "n3",
 			in: prometheus.MetricFamily{
 				Name: "histogram1",
@@ -228,7 +228,7 @@ func TestMetricToOcMetric(t *testing.T) {
 			},
 		},
 		{
-			name: "summary to summary",
+			name:   "summary to summary",
 			nodeId: "n3",
 			in: prometheus.MetricFamily{
 				Name: "summary1",
@@ -246,16 +246,16 @@ func TestMetricToOcMetric(t *testing.T) {
 							SampleSum:   6,
 							Quantile: []*prometheus.Quantile{
 								{
-									Value: 1,
-									Quantile:      0.5,
+									Value:    1,
+									Quantile: 0.5,
 								},
 								{
-									Value: 2,
-									Quantile:      0.9,
+									Value:    2,
+									Quantile: 0.9,
 								},
 								{
-									Value: 3,
-									Quantile:      1.0,
+									Value:    3,
+									Quantile: 1.0,
 								},
 							},
 						},
@@ -281,7 +281,7 @@ func TestMetricToOcMetric(t *testing.T) {
 										Count: &wrappers.Int64Value{
 											Value: 3,
 										},
-										Sum:   &wrappers.DoubleValue{
+										Sum: &wrappers.DoubleValue{
 											Value: 6.0,
 										},
 										Snapshot: &ocmetricspb.SummaryValue_Snapshot{
@@ -333,6 +333,118 @@ func TestMetricToOcMetric(t *testing.T) {
 			if !cmp.Equal(gotTs, tc.want.Timeseries[i]) {
 				t.Fatalf("test timeseries %s:\n got=%v\n want=%v\n", tc.name, gotTs, wantTs)
 			}
+		}
+	}
+}
+
+func TestExtractName(t *testing.T) {
+	ir, _ := New("127.0.0.0:55690", nil)
+	tcs := []struct {
+		nameIn  string
+		wantMfe *mfEntry
+	}{
+		{nameIn: "cluster.inbound|9555|grpc|adservice.default.svc.cluster.local.upstream_rq_time",
+			wantMfe: &mfEntry{
+				renamed: true,
+				name:    "upstream_rq_time",
+				labelValues: []*ocmetricspb.LabelValue{
+					{Value: "inbound", HasValue: true},
+					{Value: "9555", HasValue: true},
+					{Value: "grpc", HasValue: true},
+					{Value: "adservice.default", HasValue: true},
+					{Value: "", HasValue: false},
+				},
+			},
+		},
+		{nameIn: "cluster.inbound|9555|grpc|adservice.default.svc.cluster.local.external.upstream_rq_time",
+			wantMfe: &mfEntry{
+				renamed: true,
+				name:    "upstream_rq_time",
+				labelValues: []*ocmetricspb.LabelValue{
+					{Value: "inbound", HasValue: true},
+					{Value: "9555", HasValue: true},
+					{Value: "grpc", HasValue: true},
+					{Value: "adservice.default", HasValue: true},
+					{Value: "external", HasValue: true},
+				},
+			},
+		},
+		{nameIn: "cluster.outbound|9555||adservice.default.svc.cluster.local.external.upstream_rq_time",
+			wantMfe: &mfEntry{
+				renamed: true,
+				name:    "upstream_rq_time",
+				labelValues: []*ocmetricspb.LabelValue{
+					{Value: "outbound", HasValue: true},
+					{Value: "9555", HasValue: true},
+					{Value: "", HasValue: false},
+					{Value: "adservice.default", HasValue: true},
+					{Value: "external", HasValue: true},
+				},
+			},
+		},
+		{nameIn: "cluster.outbound|9555||adservice.default.svc.cluster.local.upstream_rq_time",
+			wantMfe: &mfEntry{
+				renamed: true,
+				name:    "upstream_rq_time",
+				labelValues: []*ocmetricspb.LabelValue{
+					{Value: "outbound", HasValue: true},
+					{Value: "9555", HasValue: true},
+					{Value: "", HasValue: false},
+					{Value: "adservice.default", HasValue: true},
+					{Value: "", HasValue: false},
+				},
+			},
+		},
+		{nameIn: "cluster.outbound|9091||istio-telemetry.istio-system.svc.cluster.local.zone.us-central1-b.us-central1-c.upstream_rq_time",
+			wantMfe: &mfEntry{
+				renamed: true,
+				name:    "upstream_rq_time",
+				labelValues: []*ocmetricspb.LabelValue{
+					{Value: "outbound", HasValue: true},
+					{Value: "9091", HasValue: true},
+					{Value: "", HasValue: false},
+					{Value: "istio-telemetry.istio-system", HasValue: true},
+					{Value: "zone.us-central1-b.us-central1-c", HasValue: true},
+				},
+			},
+		},
+		{nameIn: "cluster.prometheus_stats.external.upstream_rq_time",
+			wantMfe: &mfEntry{
+				renamed: true,
+				name:    "upstream_rq_time",
+				labelValues: []*ocmetricspb.LabelValue{
+					{Value: "", HasValue: false},
+					{Value: "", HasValue: false},
+					{Value: "", HasValue: false},
+					{Value: "prometheus_stats", HasValue: true},
+					{Value: "external", HasValue: true},
+				},
+			},
+		},
+		{nameIn: "cluster.prometheus_stats.upstream_rq_time",
+			wantMfe: &mfEntry{
+				renamed: true,
+				name:    "upstream_rq_time",
+				labelValues: []*ocmetricspb.LabelValue{
+					{Value: "", HasValue: false},
+					{Value: "", HasValue: false},
+					{Value: "", HasValue: false},
+					{Value: "prometheus_stats", HasValue: true},
+					{Value: "", HasValue: false},
+				},
+			},
+		},
+		{nameIn: "junk.service.name",
+			wantMfe: &mfEntry{
+				renamed: false,
+			},
+		},
+	}
+	for _, tc := range tcs {
+		mfe := &mfEntry{}
+		ir.recreateName(tc.nameIn, mfe)
+		if !cmp.Equal(mfe, tc.wantMfe, cmp.AllowUnexported(mfEntry{})) {
+			t.Fatalf("test metric %s:\n got=%v\n want=%v\n", tc.nameIn, mfe, tc.wantMfe)
 		}
 	}
 }

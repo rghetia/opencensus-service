@@ -41,6 +41,7 @@ import (
 	"google.golang.org/grpc"
 	prometheus "istio.io/gogo-genproto/prometheus"
 	"go.opencensus.io/resource/resourcekeys"
+	"regexp"
 )
 
 // Receiver is the type that exposes Trace and Metrics reception.
@@ -60,14 +61,14 @@ type Receiver struct {
 
 type metricsdb struct {
 	node *core.Node
-	res *resourcepb.Resource
+	res  *resourcepb.Resource
 	mfes map[string]*mfEntry
 }
 
 type mfEntry struct {
 	mf          *prometheus.MetricFamily
 	metricMap   map[string]*prometheus.Metric
-	rename      bool
+	renamed     bool
 	name        string
 	labelKeys   []*ocmetricspb.LabelKey
 	labelValues []*ocmetricspb.LabelValue
@@ -133,7 +134,7 @@ func (ir *Receiver) StreamMetrics(stream metricspb.MetricsService_StreamMetricsS
 			if id != nil && id.Node != nil {
 				db = &metricsdb{
 					node: id.Node,
-					res: ir.toResource(id.Node),
+					res:  ir.toResource(id.Node),
 					mfes: map[string]*mfEntry{},
 				}
 				log.Printf("initialize node-id %s, node: %v\n", db.node.Id, id.Node)
@@ -234,80 +235,58 @@ var labelKeySvc = []*ocmetricspb.LabelKey{
 	{Key: "port"},
 	{Key: "protocol"},
 	{Key: "service"},
+	{Key: "origin"},
 }
 
-func (ir *Receiver) recreateName(mf *prometheus.MetricFamily, mfe *mfEntry) {
+func createLabelValue(value string) *ocmetricspb.LabelValue {
+	return &ocmetricspb.LabelValue{Value: value, HasValue: value != ""}
+}
 
-	service := ""
+func (ir *Receiver) recreateName(nameIn string, mfe *mfEntry) {
+	var direction, port, proto, origin string
+	addLabels := false;
 
-	nameIn := mf.GetName()
+	rName, _ := regexp.Compile(`^(cluster|http)\.(.*)\.([a-zA-Z_]*)$`)
+	rOrigin, _ := regexp.Compile(`^(.*)\.(external|internal|zone.*)$`)
+	rSubName, _ := regexp.Compile(`^(outbound|inbound)\|([0-9]*)\|([a-z]*)\|(.*)\.svc\.cluster\.local$`)
 
-	//  12 metric=cluster.outbound|9091||istio-telemetry.istio-system.svc.cluster.local.internal.upstream_rq_2xx,
-	//  12 metric=cluster.outbound|9091||istio-telemetry.istio-system.svc.cluster.local.upstream_cx_rx_bytes_total,
-	// direction | port | protocol | serviceAndMetric
-	//  5 metadata.google.internal.external.upstream_rq_time,
-	//	5 metadata.google.internal.upstream_rq_time,
-	//	1 metric=cluster.PassthroughCluster.external.upstream_rq_time,
-	//	1 metric=cluster.PassthroughCluster.upstream_rq_time,
-	//	12 metric=cluster.prometheus_stats.external.upstream_rq_time,
-	//	12 metric=cluster.prometheus_stats.upstream_rq_time,
-	//	2 paymentservice.default.svc.cluster.local.external.upstream_rq_time,
-	//  2 paymentservice.default.svc.cluster.local.upstream_rq_time,
-	//  1 paymentservice.default.svc.cluster.local.zone.us-central1-a.us-central1-b.upstream_rq_time,
-	if strings.Contains(nameIn, "cluster.PassthroughCluster") ||
-		strings.Contains(nameIn, "cluster.prometheus_stats") {
-			return
+	match := rName.FindStringSubmatch(nameIn)
+	if len(match) != 4 {
+		return
 	}
-	if strings.Contains(nameIn, "|") {
-		parts := strings.Split(nameIn, "|")
-		if len(parts) == 4 {
-			mfe.rename = true
-			serviceAndMetric := parts[3]
-			subparts := strings.Split(serviceAndMetric, ".")
-			l := len(subparts)
-			if l > 1 {
-				if l > 2 && (subparts[l-2] == "external" || subparts[l-2] == "internal") {
-					mfe.name = strings.Join(subparts[len(subparts)-2:], ".")
-					service = strings.Join(subparts[:(l - 2)], ".")
-				} else {
-					mfe.name = subparts[len(subparts)-1]
-					service = strings.Join(subparts[:(l - 1)], ".")
-				}
-			} else {
-				mfe.name = serviceAndMetric
-			}
 
-			mfe.labelKeys = labelKeySvc
-			mfe.labelValues = []*ocmetricspb.LabelValue{
-				{Value: parts[0], HasValue: true},
-				{Value: parts[1], HasValue: true},
-				{Value: parts[2], HasValue: true},
-				{Value: service, HasValue: true},
-			}
+	mfe.name = match[3]
+	svcName := match[2]
+
+	if match[1] == "cluster" {
+		match = rOrigin.FindStringSubmatch(svcName)
+		if len(match) == 3 {
+			origin = match[2]
+			svcName = match[1]
 		}
-	} else if strings.HasPrefix(nameIn, "http") {
-		//  1 metric=http.10.24.13.143_9555.downstream_cx_tx_bytes_total,
-		//	1 metric=http.10.24.13.143_9555.downstream_rq_2xx,
-		parts := strings.Split(nameIn, ".")
-		port := ""
-		l := len(parts)
-		if l == 6 {
-			mfe.rename = true
-			mfe.name = parts[l-1]
-			subpart := strings.Split(parts[4], "_")
-			l = len(subpart)
-			if l == 2 {
-				port = subpart[1]
-				service = strings.Join(parts[1:][:3], ".")
-				service = fmt.Sprintf("%s.%s", service, subpart[0])
-			}
-			mfe.labelKeys = labelKeySvc
-			mfe.labelValues = []*ocmetricspb.LabelValue{
-				{Value: "", HasValue: false},
-				{Value: port, HasValue: true},
-				{Value: "http", HasValue: true},
-				{Value: service, HasValue: true},
-			}
+
+		match = rSubName.FindStringSubmatch(svcName)
+		if len(match) == 5 {
+			direction = match[1]
+			port = match[2]
+			proto = match[3]
+			svcName = match[4]
+		}
+
+		addLabels = true
+		mfe.renamed = true
+	} else if match[0] == "http" {
+		proto = "http"
+		addLabels = true
+	}
+
+	if addLabels {
+		mfe.labelValues = []*ocmetricspb.LabelValue{
+			createLabelValue(direction),
+			createLabelValue(port),
+			createLabelValue(proto),
+			createLabelValue(svcName),
+			createLabelValue(origin),
 		}
 	}
 }
@@ -317,7 +296,7 @@ func (ir *Receiver) toDesc(metric *prometheus.MetricFamily, mfe *mfEntry) *ocmet
 	name := metric.GetName()
 	labelKeys := ir.toLabelKeys(metric)
 
-	if mfe != nil && mfe.rename {
+	if mfe != nil && mfe.renamed {
 		name = mfe.name
 		labelKeys = append(mfe.labelKeys, labelKeys...)
 	}
@@ -346,7 +325,7 @@ func (ir *Receiver) sumToSum(m *prometheus.Metric) *ocmetricspb.Point_SummaryVal
 	for _, b := range quantiles {
 		valueAtPercentiles[idx] = &ocmetricspb.SummaryValue_Snapshot_ValueAtPercentile{
 			Percentile: b.Quantile,
-			Value: b.Value,
+			Value:      b.Value,
 		}
 		idx++
 	}
@@ -355,7 +334,7 @@ func (ir *Receiver) sumToSum(m *prometheus.Metric) *ocmetricspb.Point_SummaryVal
 			Snapshot: &ocmetricspb.SummaryValue_Snapshot{
 				PercentileValues: valueAtPercentiles,
 			},
-			Sum:   &wrappers.DoubleValue{
+			Sum: &wrappers.DoubleValue{
 				Value: sum,
 			},
 			Count: &wrappers.Int64Value{
@@ -364,7 +343,6 @@ func (ir *Receiver) sumToSum(m *prometheus.Metric) *ocmetricspb.Point_SummaryVal
 		}}
 	return dv
 }
-
 
 func (ir *Receiver) histToDist(m *prometheus.Metric) *ocmetricspb.Point_DistributionValue {
 	var count uint64
@@ -438,7 +416,7 @@ func (ir *Receiver) toPoint(mt prometheus.MetricType, m *prometheus.Metric) ([]*
 
 func (ir *Receiver) toOneTimeseries(mf *prometheus.MetricFamily, m *prometheus.Metric, startTime int64, nodeId string, mfe *mfEntry) (*ocmetricspb.TimeSeries, error) {
 	lv := make([]*ocmetricspb.LabelValue, 0, 0)
-	if mfe != nil && mfe.rename {
+	if mfe != nil && mfe.renamed {
 		lv = append(lv, mfe.labelValues...)
 	}
 	lv = append(lv, &ocmetricspb.LabelValue{Value: nodeId})
@@ -515,8 +493,8 @@ func (ir *Receiver) addOrGetMfe(db *metricsdb, mf *prometheus.MetricFamily) *mfE
 	if !ok {
 		//save first
 		mfe = &mfEntry{mf: mf, metricMap: map[string]*prometheus.Metric{}}
-		ir.recreateName(mf, mfe)
-		db.mfes[mf.Name] = mfe
+		ir.recreateName(mf.GetName(), mfe)
+		db.mfes[mf.GetName()] = mfe
 	}
 	return mfe
 }
@@ -532,7 +510,7 @@ func (ir *Receiver) toResource(node *core.Node) *resourcepb.Resource {
 	// TODO: [rghetia] container name is mandatory.
 	r.Labels[resourcekeys.ContainerKeyName] = ""
 
-	// TODO: [rghetia] clustername is <app>.<namespace>. It should be kubernetes cluster name.
+	// TODO: [rghetia] clustername is <app>.<namespace>. Should it be kubernetes cluster name?
 	r.Labels[resourcekeys.K8SKeyClusterName] = node.GetCluster()
 	metadata := node.Metadata
 	if metadata != nil {

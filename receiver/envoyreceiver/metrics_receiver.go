@@ -37,10 +37,10 @@ import (
 	metricspb "github.com/envoyproxy/go-control-plane/envoy/service/metrics/v2"
 	"github.com/golang/protobuf/ptypes/timestamp"
 	"github.com/golang/protobuf/ptypes/wrappers"
+	"go.opencensus.io/resource/resourcekeys"
 	"google.golang.org/api/support/bundler"
 	"google.golang.org/grpc"
 	prometheus "istio.io/gogo-genproto/prometheus"
-	"go.opencensus.io/resource/resourcekeys"
 	"regexp"
 )
 
@@ -248,7 +248,7 @@ func createLabelValue(value string) *ocmetricspb.LabelValue {
 
 func (ir *Receiver) recreateName(nameIn string, mfe *mfEntry) {
 	var direction, port, proto, origin string
-	addLabels := false;
+	addLabels := false
 
 	rName, _ := regexp.Compile(`^(cluster|http)\.(.*)\.([0-9a-zA-Z_]*)$`)
 	rOrigin, _ := regexp.Compile(`^(.*)\.(external|internal|zone.*)$`)
@@ -436,10 +436,10 @@ func (ir *Receiver) toOneTimeseries(mf *prometheus.MetricFamily, m *prometheus.M
 	if mfe != nil && mfe.renamed {
 		lv = append(lv, mfe.labelValues...)
 	}
-	lv = append(lv, &ocmetricspb.LabelValue{Value: nodeId})
+	lv = append(lv, createLabelValue(nodeId))
 	labels := m.Label
 	for _, label := range labels {
-		lv = append(lv, &ocmetricspb.LabelValue{Value: label.GetValue()})
+		lv = append(lv, createLabelValue(label.GetValue()))
 	}
 	pt, err := ir.toPoint(mf.Type, m)
 	if err != nil {
@@ -479,7 +479,7 @@ func metricSignature(metric *prometheus.Metric) string {
 
 func (ir *Receiver) computeDiff(first, curr *prometheus.Metric, metricType prometheus.MetricType) error {
 
-	switch(metricType) {
+	switch metricType {
 	case prometheus.MetricType_COUNTER:
 		curr.Counter.Value = curr.Counter.Value - first.Counter.Value
 	case prometheus.MetricType_HISTOGRAM:

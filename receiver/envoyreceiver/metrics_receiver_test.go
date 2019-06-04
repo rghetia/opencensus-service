@@ -18,9 +18,9 @@ import (
 	"testing"
 
 	ocmetricspb "github.com/census-instrumentation/opencensus-proto/gen-go/metrics/v1"
+	"github.com/golang/protobuf/ptypes/wrappers"
 	"github.com/google/go-cmp/cmp"
 	prometheus "istio.io/gogo-genproto/prometheus"
-	"github.com/golang/protobuf/ptypes/wrappers"
 )
 
 func TestMetricToOcMetric(t *testing.T) {
@@ -41,15 +41,10 @@ func TestMetricToOcMetric(t *testing.T) {
 				Metric: []*prometheus.Metric{
 					{
 						Label: []*prometheus.LabelPair{
-							{
-								Name:  "k1",
-								Value: "v1",
-							},
+							{Name: "k1", Value: "v1"},
 						},
-						Gauge: &prometheus.Gauge{},
-						Counter: &prometheus.Counter{
-							Value: 64.5,
-						},
+						Gauge:       &prometheus.Gauge{},
+						Counter:     &prometheus.Counter{Value: 64.5},
 						Summary:     &prometheus.Summary{},
 						Untyped:     &prometheus.Untyped{},
 						Histogram:   &prometheus.Histogram{},
@@ -76,12 +71,8 @@ func TestMetricToOcMetric(t *testing.T) {
 						},
 						StartTimestamp: msecToProtoTimestamp(0),
 						LabelValues: []*ocmetricspb.LabelValue{
-							{
-								Value: "n1",
-							},
-							{
-								Value: "v1",
-							},
+							{Value: "n1", HasValue: true},
+							{Value: "v1", HasValue: true},
 						},
 					},
 				},
@@ -96,10 +87,7 @@ func TestMetricToOcMetric(t *testing.T) {
 				Metric: []*prometheus.Metric{
 					{
 						Label: []*prometheus.LabelPair{
-							{
-								Name:  "k1",
-								Value: "v1",
-							},
+							{Name: "k1", Value: "v1"},
 						},
 						Gauge: &prometheus.Gauge{
 							Value: 55.5,
@@ -130,12 +118,8 @@ func TestMetricToOcMetric(t *testing.T) {
 						},
 						StartTimestamp: msecToProtoTimestamp(0),
 						LabelValues: []*ocmetricspb.LabelValue{
-							{
-								Value: "n2",
-							},
-							{
-								Value: "v1",
-							},
+							{Value: "n2", HasValue: true},
+							{Value: "v1", HasValue: true},
 						},
 					},
 				},
@@ -150,23 +134,14 @@ func TestMetricToOcMetric(t *testing.T) {
 				Metric: []*prometheus.Metric{
 					{
 						Label: []*prometheus.LabelPair{
-							{
-								Name:  "k1",
-								Value: "v1",
-							},
+							{Name: "k1", Value: "v1"},
 						},
 						Histogram: &prometheus.Histogram{
 							SampleCount: 3,
 							SampleSum:   150.5,
 							Bucket: []*prometheus.Bucket{
-								{
-									CumulativeCount: 1,
-									UpperBound:      10.0,
-								},
-								{
-									CumulativeCount: 2,
-									UpperBound:      50.0,
-								},
+								{CumulativeCount: 1, UpperBound: 10.0},
+								{CumulativeCount: 2, UpperBound: 50.0},
 							},
 						},
 						TimestampMs: 0,
@@ -200,15 +175,9 @@ func TestMetricToOcMetric(t *testing.T) {
 											},
 										},
 										Buckets: []*ocmetricspb.DistributionValue_Bucket{
-											{
-												Count: 1,
-											},
-											{
-												Count: 1,
-											},
-											{
-												Count: 1,
-											},
+											{Count: 1},
+											{Count: 1},
+											{Count: 1},
 										},
 									},
 								},
@@ -217,103 +186,8 @@ func TestMetricToOcMetric(t *testing.T) {
 						},
 						StartTimestamp: msecToProtoTimestamp(0),
 						LabelValues: []*ocmetricspb.LabelValue{
-							{
-								Value: "n3",
-							},
-							{
-								Value: "v1",
-							},
-						},
-					},
-				},
-			},
-		},
-		{
-			name:   "summary to summary",
-			nodeId: "n3",
-			in: &prometheus.MetricFamily{
-				Name: "summary1",
-				Type: prometheus.MetricType_SUMMARY,
-				Metric: []*prometheus.Metric{
-					{
-						Label: []*prometheus.LabelPair{
-							{
-								Name:  "k1",
-								Value: "v1",
-							},
-						},
-						Summary: &prometheus.Summary{
-							SampleCount: 3,
-							SampleSum:   6,
-							Quantile: []*prometheus.Quantile{
-								{
-									Value:    1,
-									Quantile: 0.5,
-								},
-								{
-									Value:    2,
-									Quantile: 0.9,
-								},
-								{
-									Value:    3,
-									Quantile: 1.0,
-								},
-							},
-						},
-						TimestampMs: 0,
-					},
-				},
-			},
-			want: ocmetricspb.Metric{
-				MetricDescriptor: &ocmetricspb.MetricDescriptor{
-					Name: "summary1",
-					Type: ocmetricspb.MetricDescriptor_SUMMARY,
-					LabelKeys: []*ocmetricspb.LabelKey{
-						{Key: "node_id"},
-						{Key: "k1"},
-					},
-				},
-				Timeseries: []*ocmetricspb.TimeSeries{
-					{
-						Points: []*ocmetricspb.Point{
-							{
-								Value: &ocmetricspb.Point_SummaryValue{
-									SummaryValue: &ocmetricspb.SummaryValue{
-										Count: &wrappers.Int64Value{
-											Value: 3,
-										},
-										Sum: &wrappers.DoubleValue{
-											Value: 6.0,
-										},
-										Snapshot: &ocmetricspb.SummaryValue_Snapshot{
-											PercentileValues: []*ocmetricspb.SummaryValue_Snapshot_ValueAtPercentile{
-												{
-													Percentile: 0.5,
-													Value:      1,
-												},
-												{
-													Percentile: 0.9,
-													Value:      2,
-												},
-												{
-													Percentile: 1.0,
-													Value:      3,
-												},
-											},
-										},
-									},
-								},
-								Timestamp: msecToProtoTimestamp(0),
-							},
-						},
-						StartTimestamp: msecToProtoTimestamp(0),
-						LabelValues: []*ocmetricspb.LabelValue{
-							{
-								Value: "n3",
-							},
-							{
-								Value: "v1",
-							},
+							{Value: "n3", HasValue: true},
+							{Value: "v1", HasValue: true},
 						},
 					},
 				},
@@ -328,27 +202,15 @@ func TestMetricToOcMetric(t *testing.T) {
 				Metric: []*prometheus.Metric{
 					{
 						Label: []*prometheus.LabelPair{
-							{
-								Name:  "k1",
-								Value: "v1",
-							},
+							{Name: "k1", Value: "v1"},
 						},
 						Summary: &prometheus.Summary{
 							SampleCount: 3,
 							SampleSum:   6,
 							Quantile: []*prometheus.Quantile{
-								{
-									Value:    1,
-									Quantile: 0.5,
-								},
-								{
-									Value:    2,
-									Quantile: 0.9,
-								},
-								{
-									Value:    3,
-									Quantile: 1.0,
-								},
+								{Value: 1, Quantile: 0.5},
+								{Value: 2, Quantile: 0.9},
+								{Value: 3, Quantile: 1.0},
 							},
 						},
 						TimestampMs: 0,
@@ -383,18 +245,9 @@ func TestMetricToOcMetric(t *testing.T) {
 										},
 										Snapshot: &ocmetricspb.SummaryValue_Snapshot{
 											PercentileValues: []*ocmetricspb.SummaryValue_Snapshot_ValueAtPercentile{
-												{
-													Percentile: 0.5,
-													Value:      1,
-												},
-												{
-													Percentile: 0.9,
-													Value:      2,
-												},
-												{
-													Percentile: 1.0,
-													Value:      3,
-												},
+												{Percentile: 0.5, Value: 1},
+												{Percentile: 0.9, Value: 2},
+												{Percentile: 1.0, Value: 3},
 											},
 										},
 									},
@@ -409,12 +262,8 @@ func TestMetricToOcMetric(t *testing.T) {
 							{Value: "grpc", HasValue: true},
 							{Value: "adservice.default", HasValue: true},
 							{Value: "", HasValue: false},
-							{
-								Value: "n3",
-							},
-							{
-								Value: "v1",
-							},
+							{Value: "n3", HasValue: true},
+							{Value: "v1", HasValue: true},
 						},
 					},
 				},
@@ -448,8 +297,8 @@ func TestExtractName(t *testing.T) {
 	}{
 		{nameIn: "cluster.inbound|9555|grpc|adservice.default.svc.cluster.local.upstream_rq_time",
 			wantMfe: &mfEntry{
-				renamed: true,
-				name:    "upstream_rq_time",
+				renamed:   true,
+				name:      "upstream_rq_time",
 				labelKeys: labelKeySvc,
 				labelValues: []*ocmetricspb.LabelValue{
 					{Value: "inbound", HasValue: true},
@@ -462,8 +311,8 @@ func TestExtractName(t *testing.T) {
 		},
 		{nameIn: "cluster.inbound|9555|grpc|adservice.default.svc.cluster.local.external.upstream_rq_time",
 			wantMfe: &mfEntry{
-				renamed: true,
-				name:    "upstream_rq_time",
+				renamed:   true,
+				name:      "upstream_rq_time",
 				labelKeys: labelKeySvc,
 				labelValues: []*ocmetricspb.LabelValue{
 					{Value: "inbound", HasValue: true},
@@ -476,8 +325,8 @@ func TestExtractName(t *testing.T) {
 		},
 		{nameIn: "cluster.outbound|9555||adservice.default.svc.cluster.local.external.upstream_rq_time",
 			wantMfe: &mfEntry{
-				renamed: true,
-				name:    "upstream_rq_time",
+				renamed:   true,
+				name:      "upstream_rq_time",
 				labelKeys: labelKeySvc,
 				labelValues: []*ocmetricspb.LabelValue{
 					{Value: "outbound", HasValue: true},
@@ -490,8 +339,8 @@ func TestExtractName(t *testing.T) {
 		},
 		{nameIn: "cluster.outbound|9555||adservice.default.svc.cluster.local.upstream_rq_time",
 			wantMfe: &mfEntry{
-				renamed: true,
-				name:    "upstream_rq_time",
+				renamed:   true,
+				name:      "upstream_rq_time",
 				labelKeys: labelKeySvc,
 				labelValues: []*ocmetricspb.LabelValue{
 					{Value: "outbound", HasValue: true},
@@ -504,8 +353,8 @@ func TestExtractName(t *testing.T) {
 		},
 		{nameIn: "cluster.outbound|9091||istio-telemetry.istio-system.svc.cluster.local.zone.us-central1-b.us-central1-c.upstream_rq_time",
 			wantMfe: &mfEntry{
-				renamed: true,
-				name:    "upstream_rq_time",
+				renamed:   true,
+				name:      "upstream_rq_time",
 				labelKeys: labelKeySvc,
 				labelValues: []*ocmetricspb.LabelValue{
 					{Value: "outbound", HasValue: true},
@@ -518,8 +367,8 @@ func TestExtractName(t *testing.T) {
 		},
 		{nameIn: "cluster.prometheus_stats.external.upstream_rq_time",
 			wantMfe: &mfEntry{
-				renamed: true,
-				name:    "upstream_rq_time",
+				renamed:   true,
+				name:      "upstream_rq_time",
 				labelKeys: labelKeySvc,
 				labelValues: []*ocmetricspb.LabelValue{
 					{Value: "", HasValue: false},
@@ -532,8 +381,8 @@ func TestExtractName(t *testing.T) {
 		},
 		{nameIn: "cluster.prometheus_stats.upstream_rq_time",
 			wantMfe: &mfEntry{
-				renamed: true,
-				name:    "upstream_rq_time",
+				renamed:   true,
+				name:      "upstream_rq_time",
 				labelKeys: labelKeySvc,
 				labelValues: []*ocmetricspb.LabelValue{
 					{Value: "", HasValue: false},
@@ -546,8 +395,8 @@ func TestExtractName(t *testing.T) {
 		},
 		{nameIn: "cluster.xds-grpc.upstream_rq_2xx",
 			wantMfe: &mfEntry{
-				renamed: true,
-				name:    "upstream_rq_2xx",
+				renamed:   true,
+				name:      "upstream_rq_2xx",
 				labelKeys: labelKeySvc,
 				labelValues: []*ocmetricspb.LabelValue{
 					{Value: "", HasValue: false},
@@ -560,8 +409,8 @@ func TestExtractName(t *testing.T) {
 		},
 		{nameIn: "http.10.24.10.187_7070.downstream_cx_active",
 			wantMfe: &mfEntry{
-				renamed: true,
-				name:    "downstream_cx_active",
+				renamed:   true,
+				name:      "downstream_cx_active",
 				labelKeys: labelKeySvc,
 				labelValues: []*ocmetricspb.LabelValue{
 					{Value: "", HasValue: false},
@@ -574,8 +423,8 @@ func TestExtractName(t *testing.T) {
 		},
 		{nameIn: "cluster.outbound|80||metadata.google.internal.external.upstream_rq_time",
 			wantMfe: &mfEntry{
-				renamed: true,
-				name:    "upstream_rq_time",
+				renamed:   true,
+				name:      "upstream_rq_time",
 				labelKeys: labelKeySvc,
 				labelValues: []*ocmetricspb.LabelValue{
 					{Value: "outbound", HasValue: true},

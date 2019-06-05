@@ -70,6 +70,7 @@ type mfEntry struct {
 	metricMap   map[string]*prometheus.Metric
 	renamed     bool
 	name        string
+	desc        *ocmetricspb.MetricDescriptor
 	labelKeys   []*ocmetricspb.LabelKey
 	labelValues []*ocmetricspb.LabelValue
 }
@@ -263,6 +264,7 @@ func (ir *Receiver) recreateName(nameIn string, mfe *mfEntry) {
 
 	match := rName.FindStringSubmatch(nameIn)
 	if len(match) != 4 {
+		mfe.name = nameIn
 		return
 	}
 
@@ -313,7 +315,19 @@ func (ir *Receiver) recreateName(nameIn string, mfe *mfEntry) {
 	}
 }
 
-func (ir *Receiver) toDesc(metric *prometheus.MetricFamily, mfe *mfEntry) *ocmetricspb.MetricDescriptor {
+func (ir *Receiver) toUnit(metric *prometheus.MetricFamily, mfe *mfEntry) string {
+	if metric.Type == prometheus.MetricType_SUMMARY ||
+		metric.Type == prometheus.MetricType_HISTOGRAM {
+		return "ms"
+	} else {
+		if strings.Contains(mfe.name, "bytes") {
+			return "By"
+		}
+	}
+	return "1"
+}
+
+func (ir *Receiver) createDesc(metric *prometheus.MetricFamily, mfe *mfEntry) {
 
 	name := metric.GetName()
 	labelKeys := ir.toLabelKeys(metric)
@@ -322,13 +336,13 @@ func (ir *Receiver) toDesc(metric *prometheus.MetricFamily, mfe *mfEntry) *ocmet
 		name = mfe.name
 		labelKeys = append(mfe.labelKeys, labelKeys...)
 	}
-	desc := &ocmetricspb.MetricDescriptor{
+	mfe.desc = &ocmetricspb.MetricDescriptor{
 		Name:        name,
 		Description: "",
 		Type:        ir.toType(metric),
 		LabelKeys:   labelKeys,
+		Unit:        ir.toUnit(metric, mfe),
 	}
-	return desc
 }
 
 func (ir *Receiver) sumToSum(m *prometheus.Metric) *ocmetricspb.Point_SummaryValue {
@@ -516,6 +530,7 @@ func (ir *Receiver) addOrGetMfe(db *metricsdb, mf *prometheus.MetricFamily) *mfE
 		//save first
 		mfe = &mfEntry{mf: mf, metricMap: map[string]*prometheus.Metric{}}
 		ir.recreateName(mf.GetName(), mfe)
+		ir.createDesc(mf, mfe)
 		db.mfes[mf.GetName()] = mfe
 	}
 	return mfe
@@ -563,8 +578,7 @@ func (ir *Receiver) compareAndExport(db *metricsdb, mfs []*prometheus.MetricFami
 	for _, mf := range mfs {
 		mfe := ir.addOrGetMfe(db, mf)
 
-		descriptor := ir.toDesc(mf, mfe)
-		if descriptor.Type == ocmetricspb.MetricDescriptor_UNSPECIFIED {
+		if mfe.desc.Type == ocmetricspb.MetricDescriptor_UNSPECIFIED {
 			// TODO [rghetia] export the counters
 			atomic.AddInt64(&unspecifiedMetricErrorCount, 1)
 			continue
@@ -595,7 +609,7 @@ func (ir *Receiver) compareAndExport(db *metricsdb, mfs []*prometheus.MetricFami
 		}
 		if len(tss) > 0 {
 			ocmetric := &ocmetricspb.Metric{
-				MetricDescriptor: descriptor,
+				MetricDescriptor: mfe.desc,
 				Timeseries:       tss,
 				Resource:         db.res,
 			}

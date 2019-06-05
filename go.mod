@@ -5,7 +5,7 @@ require (
 	contrib.go.opencensus.io/exporter/jaeger v0.1.1-0.20190430175949-e8b55949d948
 	contrib.go.opencensus.io/exporter/ocagent v0.5.0
 	contrib.go.opencensus.io/exporter/prometheus v0.1.0
-	contrib.go.opencensus.io/exporter/stackdriver v0.12.1
+	contrib.go.opencensus.io/exporter/stackdriver v0.12.2-0.20190603171149-68e3d742b03c
 	contrib.go.opencensus.io/exporter/zipkin v0.1.1
 	github.com/DataDog/datadog-go v2.2.0+incompatible // indirect
 	github.com/DataDog/opencensus-go-exporter-datadog v0.0.0-20181026070331-e7c4bd17b329
@@ -70,5 +70,3 @@ require (
 	k8s.io/kube-openapi v0.0.0-20190205224424-fd29a9f2f429 // indirect
 	sigs.k8s.io/structured-merge-diff v0.0.0-20190130003954-e5e029740eb8 // indirect
 )
-
-replace contrib.go.opencensus.io/exporter/stackdriver v0.12.1 => ../../../contrib.go.opencensus.io/exporter/stackdriver

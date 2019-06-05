@@ -36,7 +36,7 @@ func TestMetricToOcMetric(t *testing.T) {
 			name:   "counter to cumulative",
 			nodeId: "n1",
 			in: &prometheus.MetricFamily{
-				Name: "counter1",
+				Name: "upstream_cx_rx_bytes_total",
 				Type: prometheus.MetricType_COUNTER,
 				Metric: []*prometheus.Metric{
 					{
@@ -54,8 +54,9 @@ func TestMetricToOcMetric(t *testing.T) {
 			},
 			want: ocmetricspb.Metric{
 				MetricDescriptor: &ocmetricspb.MetricDescriptor{
-					Name: "counter1",
+					Name: "upstream_cx_rx_bytes_total",
 					Type: ocmetricspb.MetricDescriptor_CUMULATIVE_DOUBLE,
+					Unit: "By",
 					LabelKeys: []*ocmetricspb.LabelKey{
 						{Key: "node_id"},
 						{Key: "k1"},
@@ -103,6 +104,7 @@ func TestMetricToOcMetric(t *testing.T) {
 				MetricDescriptor: &ocmetricspb.MetricDescriptor{
 					Name: "gauge1",
 					Type: ocmetricspb.MetricDescriptor_GAUGE_DOUBLE,
+					Unit: "1",
 					LabelKeys: []*ocmetricspb.LabelKey{
 						{Key: "node_id"},
 						{Key: "k1"},
@@ -152,6 +154,7 @@ func TestMetricToOcMetric(t *testing.T) {
 				MetricDescriptor: &ocmetricspb.MetricDescriptor{
 					Name: "histogram1",
 					Type: ocmetricspb.MetricDescriptor_CUMULATIVE_DISTRIBUTION,
+					Unit: "ms",
 					LabelKeys: []*ocmetricspb.LabelKey{
 						{Key: "node_id"},
 						{Key: "k1"},
@@ -221,6 +224,7 @@ func TestMetricToOcMetric(t *testing.T) {
 				MetricDescriptor: &ocmetricspb.MetricDescriptor{
 					Name: "upstream_rq_time",
 					Type: ocmetricspb.MetricDescriptor_SUMMARY,
+					Unit: "ms",
 					LabelKeys: []*ocmetricspb.LabelKey{
 						{Key: "direction"},
 						{Key: "port"},
@@ -272,7 +276,7 @@ func TestMetricToOcMetric(t *testing.T) {
 	}
 	for _, tc := range tcs {
 		mfe := ir.addOrGetMfe(db, tc.in)
-		gotDesc := ir.toDesc(tc.in, mfe)
+		gotDesc := mfe.desc
 		if !cmp.Equal(gotDesc, tc.want.MetricDescriptor) {
 			t.Fatalf("test descriptor %s:\n got=%v\n want=%v\n", tc.name, *gotDesc, tc.want.MetricDescriptor)
 		}
@@ -438,6 +442,7 @@ func TestExtractName(t *testing.T) {
 		{nameIn: "junk.service.name",
 			wantMfe: &mfEntry{
 				renamed: false,
+				name:    "junk.service.name",
 			},
 		},
 	}
